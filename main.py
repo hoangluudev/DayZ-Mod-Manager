@@ -21,6 +21,10 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QAction, QIcon
 
 from src.core.app_config import get_version, get_app_name, get_app_description
+from src.core.settings_manager import SettingsManager
+from src.core.profile_manager import ProfileManager
+from src.core.default_restore import restore_server_defaults
+from src.utils.locale_manager import LocaleManager, tr
 
 
 class ProcessManager:
@@ -101,7 +105,7 @@ class MainWindow(QMainWindow):
     
     def _setup_ui(self):
         """Initialize the user interface."""
-        self.setWindowTitle(tr("app.title"))
+        self.setWindowTitle(f"{tr('app.title')} v{get_version()}")
         self.setMinimumSize(1000, 700)
         
         # Central widget
@@ -235,12 +239,25 @@ class MainWindow(QMainWindow):
         lang_layout.addStretch()
         
         layout.addLayout(lang_layout)
+
+        # Restore defaults
+        restore_layout = QHBoxLayout()
+        self.btn_restore_app_defaults = QPushButton()
+        self.btn_restore_app_defaults.clicked.connect(self._restore_app_defaults)
+        restore_layout.addWidget(self.btn_restore_app_defaults)
+
+        self.btn_restore_server_defaults = QPushButton()
+        self.btn_restore_server_defaults.clicked.connect(self._restore_server_defaults)
+        restore_layout.addWidget(self.btn_restore_server_defaults)
+        restore_layout.addStretch()
+
+        layout.addLayout(restore_layout)
         layout.addStretch()
     
     def _update_texts(self):
         """Update all UI texts with current language."""
         # Window title
-        self.setWindowTitle(tr("app.title"))
+        self.setWindowTitle(f"{tr('app.title')} v{get_version()}")
         
         # Tab names
         self.tabs.setTabText(0, tr("tabs.profiles"))
@@ -269,6 +286,8 @@ class MainWindow(QMainWindow):
         # Settings tab
         self.lbl_theme.setText(tr("settings.theme") + ":")
         self.lbl_language.setText(tr("settings.language_setting") + ":")
+        self.btn_restore_app_defaults.setText(tr("settings.restore_app_defaults"))
+        self.btn_restore_server_defaults.setText(tr("settings.restore_server_defaults"))
         
         # Update theme combo
         self.combo_theme.clear()
@@ -332,6 +351,74 @@ class MainWindow(QMainWindow):
             tr("menu.about"),
             f"{get_app_name()}\n\n{tr('app.title')}\n\nVersion {get_version()}\n\n{get_app_description()}"
         )
+
+    def _restore_app_defaults(self):
+        """Restore application settings to defaults."""
+        reply = QMessageBox.question(
+            self,
+            tr("common.confirm"),
+            tr("dialogs.confirm_restore_app_defaults"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.settings.reset_to_defaults()
+
+        # Apply restored language
+        self.locale.set_language(self.settings.get("language", "en"))
+
+        # Sync UI selections
+        lang_code = self.settings.get("language", "en")
+        lang_index = self.combo_language.findData(lang_code)
+        if lang_index >= 0:
+            self.combo_language.blockSignals(True)
+            self.combo_language.setCurrentIndex(lang_index)
+            self.combo_language.blockSignals(False)
+
+        theme_code = self.settings.get("theme", "dark")
+        theme_index = self.combo_theme.findData(theme_code)
+        if theme_index >= 0:
+            self.combo_theme.blockSignals(True)
+            self.combo_theme.setCurrentIndex(theme_index)
+            self.combo_theme.blockSignals(False)
+
+        self._update_texts()
+        self.status_bar.showMessage(tr("settings.restore_done"))
+
+    def _restore_server_defaults(self):
+        """Restore default server files (start.bat + serverDZ.cfg) into a chosen server folder."""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            tr("dialogs.select_server_folder_for_restore"),
+            self.settings.get("last_server_path", ""),
+            QFileDialog.ShowDirsOnly,
+        )
+        if not folder:
+            return
+
+        self.settings.set("last_server_path", folder)
+
+        reply = QMessageBox.question(
+            self,
+            tr("common.confirm"),
+            tr("dialogs.confirm_restore_server_defaults"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            restore_server_defaults(folder, overwrite=True)
+            self.status_bar.showMessage(tr("settings.restore_done"))
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                tr("common.error"),
+                f"{tr('settings.restore_failed')}: {e}",
+            )
     
     def _restore_window_state(self):
         """Restore window size and position from settings."""

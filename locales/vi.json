@@ -148,6 +148,10 @@
         "theme_dark": "Tối",
         "theme_light": "Sáng",
         "theme_system": "Mặc định hệ thống",
+        "restore_app_defaults": "Khôi phục mặc định ứng dụng",
+        "restore_server_defaults": "Khôi phục file mặc định server",
+        "restore_done": "Đã khôi phục mặc định thành công",
+        "restore_failed": "Khôi phục thất bại",
         "language_setting": "Ngôn ngữ",
         "paths": "Đường dẫn",
         "steamcmd_path": "Đường dẫn SteamCMD",
@@ -180,6 +184,9 @@
     "dialogs": {
         "confirm_exit": "Bạn có chắc muốn thoát không?",
         "unsaved_changes": "Bạn có thay đổi chưa lưu. Bạn có muốn lưu trước khi đóng không?",
-        "server_running": "Server vẫn đang chạy. Dừng server trước khi thoát?"
+        "server_running": "Server vẫn đang chạy. Dừng server trước khi thoát?",
+        "confirm_restore_app_defaults": "Khôi phục cài đặt ứng dụng về mặc định?",
+        "select_server_folder_for_restore": "Chọn thư mục DayZ Server để khôi phục mặc định",
+        "confirm_restore_server_defaults": "Thao tác này sẽ ghi đè start.bat và serverDZ.cfg trong thư mục server đã chọn. Tiếp tục?"
     }
 }

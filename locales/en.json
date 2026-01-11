@@ -148,6 +148,10 @@
         "theme_dark": "Dark",
         "theme_light": "Light",
         "theme_system": "System Default",
+        "restore_app_defaults": "Restore App Defaults",
+        "restore_server_defaults": "Restore Server Defaults",
+        "restore_done": "Defaults restored successfully",
+        "restore_failed": "Restore failed",
         "language_setting": "Language",
         "paths": "Paths",
         "steamcmd_path": "SteamCMD Path",
@@ -180,6 +184,9 @@
     "dialogs": {
         "confirm_exit": "Are you sure you want to exit?",
         "unsaved_changes": "You have unsaved changes. Do you want to save before closing?",
-        "server_running": "Server is still running. Stop it before exiting?"
+        "server_running": "Server is still running. Stop it before exiting?",
+        "confirm_restore_app_defaults": "Restore application settings to defaults?",
+        "select_server_folder_for_restore": "Select DayZ Server folder to restore defaults",
+        "confirm_restore_server_defaults": "This will overwrite start.bat and serverDZ.cfg in the selected server folder. Continue?"
     }
 }

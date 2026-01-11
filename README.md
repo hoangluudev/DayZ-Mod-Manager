@@ -43,6 +43,9 @@ DayzModManager/
 │
 ├── configs/                    # Configuration templates
 │   └── settings.json           # App settings (auto-generated)
+│   └── defaults/               # Default templates for restore
+│       ├── start.bat
+│       └── serverDZ.cfg
 │
 └── profiles/                   # Server profiles (user data)
     └── *.json                  # Individual profile files
@@ -132,6 +135,13 @@ The version is accessible throughout the application:
 from src import __version__  # From centralized config
 from src.core.app_config import get_version, get_app_name
 ```
+
+## 🔁 Restore Defaults
+
+- Default server templates live in `configs/defaults/`.
+- In the app, open the Settings tab and use:
+    - "Restore App Defaults" (resets app settings)
+    - "Restore Server Defaults" (overwrites `start.bat` and `serverDZ.cfg` in a selected server folder)
 
 ## 🔧 Usage Examples
 
