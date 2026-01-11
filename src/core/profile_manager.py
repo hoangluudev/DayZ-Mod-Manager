@@ -53,6 +53,8 @@ class ProfileManager:
                     profile = ServerProfile(
                         name=data['name'],
                         server_path=Path(data['server_path']),
+                        workshop_path=Path(data['workshop_path']) if data.get('workshop_path') else None,
+                        selected_mods=list(data.get('selected_mods') or []),
                         keys_folder=Path(data['keys_folder']) if data.get('keys_folder') else None,
                         mods_folder=Path(data['mods_folder']) if data.get('mods_folder') else None,
                         config_path=Path(data['config_path']) if data.get('config_path') else None,
@@ -61,9 +63,20 @@ class ProfileManager:
             except Exception as e:
                 print(f"Error loading profile {profile_file}: {e}")
     
-    def create_profile(self, name: str, server_path: Path) -> ServerProfile:
+    def create_profile(
+        self,
+        name: str,
+        server_path: Path,
+        workshop_path: Optional[Path] = None,
+        selected_mods: Optional[List[str]] = None,
+    ) -> ServerProfile:
         """Create a new profile."""
-        profile = ServerProfile(name=name, server_path=server_path)
+        profile = ServerProfile(
+            name=name,
+            server_path=server_path,
+            workshop_path=workshop_path,
+            selected_mods=list(selected_mods or []),
+        )
         return profile
     
     def save_profile(self, profile: ServerProfile) -> bool:
@@ -73,6 +86,8 @@ class ProfileManager:
             data = {
                 'name': profile.name,
                 'server_path': str(profile.server_path),
+                'workshop_path': str(profile.workshop_path) if getattr(profile, 'workshop_path', None) else None,
+                'selected_mods': list(getattr(profile, 'selected_mods', []) or []),
                 'keys_folder': str(profile.keys_folder) if profile.keys_folder else None,
                 'mods_folder': str(profile.mods_folder) if profile.mods_folder else None,
                 'config_path': str(profile.config_path) if profile.config_path else None,

@@ -176,6 +176,13 @@ class ServerProfile:
     """Server profile containing paths and configuration."""
     name: str
     server_path: Path
+
+    # Workshop
+    workshop_path: Optional[Path] = None
+
+    # Selected mods (for -mod generation / filtering integrity checks)
+    # Format: "<workshop_id>:<mod_folder>" e.g. "1559212036:@CF"
+    selected_mods: List[str] = field(default_factory=list)
     
     # Derived paths (can be customized)
     keys_folder: Optional[Path] = None

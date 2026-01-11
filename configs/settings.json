@@ -1,0 +1,18 @@
+{
+  "theme": "dark",
+  "language": "vi",
+  "steamcmd_path": "",
+  "workshop_path": "",
+  "last_server_path": "",
+  "default_workshop_path": "D:/Games/SteamLibrary/steamapps/common/DayZ/!Workshop",
+  "default_server_path": "",
+  "start_minimized": false,
+  "check_updates_on_startup": true,
+  "auto_backup": true,
+  "confirm_actions": true,
+  "auto_copy_bikeys": true,
+  "window_width": 1200,
+  "window_height": 800,
+  "window_maximized": false,
+  "last_profile": ""
+}

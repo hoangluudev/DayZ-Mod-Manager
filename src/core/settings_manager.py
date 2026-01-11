@@ -28,10 +28,17 @@ class AppSettings:
     steamcmd_path: str = ""
     workshop_path: str = ""
     last_server_path: str = ""
+    default_workshop_path: str = ""
+    default_server_path: str = ""
     
     # Startup
     start_minimized: bool = False
     check_updates_on_startup: bool = True
+    
+    # Behavior
+    auto_backup: bool = True
+    confirm_actions: bool = True
+    auto_copy_bikeys: bool = True
     
     # Window state
     window_width: int = 1200
