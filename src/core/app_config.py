@@ -16,7 +16,7 @@ class AppConfig:
     name: str = "DayZ Mod Manager"
     description: str = "DayZ Mod Manager & Server Controller"
     author: str = "Your Name"
-    license: str = "MIT"
+    license: str = "GPL-3.0"
     repository: str = ""
     homepage: str = ""
 
