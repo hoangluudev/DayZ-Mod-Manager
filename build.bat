@@ -61,6 +61,12 @@ if /I "%~1"=="clean" (
   if exist dist rmdir /s /q dist
 )
 
+REM Common Windows failure: dist\DayzModManager.exe is locked by a running process.
+REM Try to release the lock before building.
+echo [INFO] Releasing any locked DayzModManager.exe...
+taskkill /im DayzModManager.exe /F >nul 2>nul
+if exist "dist\DayzModManager.exe" del /f /q "dist\DayzModManager.exe" >nul 2>nul
+
 echo [INFO] Building EXE with PyInstaller spec...
 "%PYEXE%" -m PyInstaller --noconfirm --clean DayzModManager.spec
 if errorlevel 1 (

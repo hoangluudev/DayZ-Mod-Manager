@@ -42,6 +42,27 @@ if ($Clean) {
   if (Test-Path 'dist')  { Remove-Item -Recurse -Force 'dist' }
 }
 
+# Common Windows failure: dist\DayzModManager.exe is locked by a running process
+# or AV scanner. Try to release the lock before building.
+Write-Host '[INFO] Releasing any locked DayzModManager.exe...'
+try {
+  Get-Process -Name 'DayzModManager' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+} catch {
+  # ignore
+}
+
+$distExe = Join-Path $Root 'dist\DayzModManager.exe'
+if (Test-Path $distExe) {
+  try {
+    Remove-Item -Force $distExe -ErrorAction Stop
+  } catch {
+    Write-Host '[ERROR] Cannot delete dist\DayzModManager.exe (it is still locked).' -ForegroundColor Red
+    Write-Host '        Close the app, disable antivirus real-time scan for this folder,'
+    Write-Host '        or run: .\build.ps1 -Clean' 
+    throw
+  }
+}
+
 Write-Host '[INFO] Building EXE with PyInstaller spec...'
 & $py -m PyInstaller --noconfirm --clean 'DayzModManager.spec'
 
