@@ -31,6 +31,11 @@ class AppSettings:
     default_workshop_path: str = ""
     default_server_path: str = ""
     
+    # Data storage paths (custom storage locations)
+    data_storage_path: str = ""  # Custom data folder for app data
+    profiles_storage_path: str = ""  # Custom profiles folder
+    use_custom_storage: bool = False  # Whether to use custom storage paths
+    
     # Startup
     start_minimized: bool = False
     check_updates_on_startup: bool = True

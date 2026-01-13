@@ -228,6 +228,13 @@ CONFIG_FIELDS = {
     },
 }
 
+# Available maps/missions
+AVAILABLE_MAPS = [
+    ("dayzOffline.chernarusplus", "Chernarus (Vanilla)"),
+    ("dayzOffline.enoch", "Livonia (DLC)"),
+    ("dayzOffline.sakhal", "Sakhal (DLC)"),
+]
+
 
 class ConfigTab(QWidget):
     """Tab for editing serverDZ.cfg visually."""
@@ -237,6 +244,7 @@ class ConfigTab(QWidget):
         self.current_profile = None
         self.cfg_path = None
         self.widgets = {}
+        self.current_mission = "dayzOffline.chernarusplus"  # Default map
         
         self._setup_ui()
     
@@ -353,6 +361,24 @@ class ConfigTab(QWidget):
         self._add_field(logging_form, "adminLogPlayerList")
         content_layout.addWidget(logging_box)
         
+        # Mission/Map section
+        mission_box = QGroupBox(tr("config.section.mission"))
+        mission_layout = QFormLayout(mission_box)
+        
+        self.cmb_map = QComboBox()
+        for template, display_name in AVAILABLE_MAPS:
+            self.cmb_map.addItem(display_name, template)
+        self.cmb_map.setCurrentIndex(0)  # Default to Chernarus
+        self.cmb_map.currentIndexChanged.connect(self._on_map_changed)
+        mission_layout.addRow(tr("config.map") + ":", self.cmb_map)
+        
+        self.lbl_map_info = QLabel()
+        self.lbl_map_info.setStyleSheet("color: gray; font-size: 11px;")
+        self._update_map_info()
+        mission_layout.addRow("", self.lbl_map_info)
+        
+        content_layout.addWidget(mission_box)
+        
         content_layout.addStretch()
         
         scroll.setWidget(self.content_widget)
@@ -452,6 +478,24 @@ class ConfigTab(QWidget):
                             pass
                     elif isinstance(widget, QCheckBox):
                         widget.setChecked(value.lower() in ("1", "true"))
+            
+            # Parse mission template
+            mission_match = re.search(r'template\s*=\s*["\']?([^"\'\s;]+)["\']?\s*;', content)
+            if mission_match:
+                template = mission_match.group(1).strip()
+                self.current_mission = template
+                
+                # Find and select in combobox
+                for i in range(self.cmb_map.count()):
+                    if self.cmb_map.itemData(i) == template:
+                        self.cmb_map.setCurrentIndex(i)
+                        break
+                else:
+                    # Custom template not in list - add it temporarily
+                    self.cmb_map.addItem(f"Custom: {template}", template)
+                    self.cmb_map.setCurrentIndex(self.cmb_map.count() - 1)
+                
+                self._update_map_info()
                         
         except Exception as e:
             QMessageBox.critical(self, tr("common.error"), str(e))
@@ -472,8 +516,22 @@ class ConfigTab(QWidget):
             elif isinstance(widget, QCheckBox):
                 widget.setChecked(default)
         
+        # Reset map to default
+        self.cmb_map.setCurrentIndex(0)
+        self.current_mission = "dayzOffline.chernarusplus"
+        
         self.cfg_path = None
         self.lbl_current_file.setText(f"✨ {tr('config.new_config')}")
+    
+    def _on_map_changed(self, index):
+        """Handle map selection change."""
+        self.current_mission = self.cmb_map.currentData()
+        self._update_map_info()
+    
+    def _update_map_info(self):
+        """Update map info label."""
+        template = self.cmb_map.currentData() or "dayzOffline.chernarusplus"
+        self.lbl_map_info.setText(f"template: {template}")
     
     def _save_config(self):
         """Save the config file."""
@@ -521,13 +579,20 @@ class ConfigTab(QWidget):
             
             lines.append(f'{field_name} = {value};')
         
-        # Add mods section placeholder
+        # Get current mission template
+        mission_template = self.cmb_map.currentData() or "dayzOffline.chernarusplus"
+        
+        # Add Missions class section (proper DayZ format)
         lines.extend([
             "",
-            "// Mods (managed by DayZ Mod Manager)",
-            'Mods = "";',
-            'serverMod = "";',
-            ""
+            "// Mission configuration",
+            "class Missions",
+            "{",
+            "    class DayZ",
+            "    {",
+            f'        template="{mission_template}"; // Mission to load on server startup. <MissionName>.<TerrainName>',
+            "    };",
+            "};",
         ])
         
         return "\n".join(lines)
@@ -539,3 +604,11 @@ class ConfigTab(QWidget):
         self.btn_restore.setText(f"🔄 {tr('settings.restore_defaults')}")
         self.btn_save.setText(f"💾 {tr('common.save')}")
         self.lbl_no_profile.setText(tr("config.select_profile_first"))
+        
+        # Update mission section
+        if hasattr(self, 'mission_box'):
+            self.mission_box.setTitle(tr("config.section.mission"))
+        if hasattr(self, 'lbl_map'):
+            self.lbl_map.setText(f"{tr('config.map')}:")
+        if hasattr(self, 'map_info'):
+            self._update_map_info()

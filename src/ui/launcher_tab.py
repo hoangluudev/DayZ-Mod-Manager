@@ -7,12 +7,47 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QFormLayout, QLineEdit, QSpinBox, QCheckBox,
-    QTextEdit, QMessageBox, QFileDialog, QComboBox, QFrame
+    QTextEdit, QMessageBox, QFileDialog, QComboBox, QFrame,
+    QListWidget, QListWidgetItem, QAbstractItemView, QDialog,
+    QDialogButtonBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 
 from src.utils.locale_manager import tr
 from src.core.default_restore import default_start_bat_template
+
+
+# Priority keywords for mod sorting (lower index = higher priority)
+MOD_PRIORITY_KEYWORDS = [
+    # Core/Foundation mods - highest priority
+    ["cf", "communityframework", "community-framework", "community_framework"],
+    ["community-online-tools", "cot", "communityonlinetools"],
+    ["dabs", "dabs framework", "dabsframework"],
+    ["vppadmintools", "vpp", "vppadmin"],
+    # Expansion core
+    ["expansion", "dayzexpansion", "expansioncore"],
+    ["expansionmod"],
+    # Common frameworks
+    ["gamelab", "gamelabs"],
+    ["soundlib", "sound library"],
+    ["buildersitems", "builderstitems"],
+    ["airdrop"],
+    # Everything else has lower priority
+]
+
+
+def get_mod_priority(mod_name: str) -> int:
+    """Get priority score for a mod (lower = higher priority)."""
+    name_lower = mod_name.lower().replace("@", "").replace(" ", "").replace("-", "").replace("_", "")
+    
+    for priority, keywords in enumerate(MOD_PRIORITY_KEYWORDS):
+        for keyword in keywords:
+            keyword_clean = keyword.replace(" ", "").replace("-", "").replace("_", "")
+            if keyword_clean in name_lower or name_lower in keyword_clean:
+                return priority
+    
+    return len(MOD_PRIORITY_KEYWORDS) + 1  # Lower priority for unknown mods
 
 
 class LauncherTab(QWidget):
@@ -141,6 +176,48 @@ class LauncherTab(QWidget):
         
         content_layout.addWidget(config_box)
         
+        # Mods section
+        mods_box = QGroupBox(tr("launcher.param_mods"))
+        mods_layout = QVBoxLayout(mods_box)
+        
+        # Mod list method selection
+        method_layout = QHBoxLayout()
+        self.chk_use_mods_file = QCheckBox(tr("launcher.use_mods_file"))
+        self.chk_use_mods_file.setChecked(True)
+        self.chk_use_mods_file.setToolTip(tr("launcher.mods_file_tooltip"))
+        self.chk_use_mods_file.stateChanged.connect(self._update_preview)
+        method_layout.addWidget(self.chk_use_mods_file)
+        method_layout.addStretch()
+        
+        # Load installed mods from server folder
+        self.btn_load_from_server = QPushButton(f"📥 {tr('launcher.load_installed_mods')}")
+        self.btn_load_from_server.clicked.connect(self._load_mods_from_server)
+        method_layout.addWidget(self.btn_load_from_server)
+        
+        # Sorting button
+        self.btn_sort_mods = QPushButton(f"📊 {tr('launcher.sort_mods')}")
+        self.btn_sort_mods.clicked.connect(self._open_sort_dialog)
+        method_layout.addWidget(self.btn_sort_mods)
+        
+        self.btn_save_mods_file = QPushButton(f"💾 {tr('launcher.save_mods_file')}")
+        self.btn_save_mods_file.clicked.connect(self._save_mods_file)
+        method_layout.addWidget(self.btn_save_mods_file)
+        
+        mods_layout.addLayout(method_layout)
+        
+        # Mods text area
+        self.txt_mods = QTextEdit()
+        self.txt_mods.setPlaceholderText("@CF;@Dabs Framework;@VPPAdminTools;...")
+        self.txt_mods.setMaximumHeight(80)
+        self.txt_mods.textChanged.connect(self._update_preview)
+        mods_layout.addWidget(self.txt_mods)
+        
+        self.lbl_mods_info = QLabel()
+        self.lbl_mods_info.setStyleSheet("color: gray; font-size: 11px;")
+        mods_layout.addWidget(self.lbl_mods_info)
+        
+        content_layout.addWidget(mods_box)
+        
         # Preview section
         preview_box = QGroupBox(tr("launcher.preview"))
         preview_layout = QVBoxLayout(preview_box)
@@ -165,6 +242,9 @@ class LauncherTab(QWidget):
         # Set server location from profile
         server_path = profile_data.get("server_path", "")
         self.txt_server_location.setText(server_path)
+        
+        # Try to load existing mods.txt
+        self._load_mods_file()
         
         # Try to load existing start.bat
         bat_path = Path(server_path) / "start.bat"
@@ -297,7 +377,29 @@ class LauncherTab(QWidget):
         
         flags_str = " ".join(flags)
         
+        # Get mods string (normalize to a single-line ; separated list)
+        mods_list = self._parse_mods_list(self.txt_mods.toPlainText())
+        mods_text = self._format_mods_list(mods_list)
+        mods_count = len(mods_list)
+        self.lbl_mods_info.setText(f"{tr('mods.selected')}: {mods_count} mods")
+        
+        # Determine mod parameter method
+        use_mods_file = self.chk_use_mods_file.isChecked()
+        
+        if use_mods_file:
+            mods_param = '"-mod=%modlist%"'
+            mods_file_section = f'''::Load mods from mods.txt
+set /p modlist=<mods.txt
+'''
+        else:
+            if mods_text:
+                mods_param = f'"-mod={mods_text}"'
+            else:
+                mods_param = ""
+            mods_file_section = ""
+        
         content = f'''@echo off
+:start
 
 ::Server name
 set serverName={self.txt_server_name.text()}
@@ -320,23 +422,21 @@ title %serverName% batch
 ::DayZServer location (DONT edit)
 cd "%serverLocation%"
 
-:launch
+{mods_file_section}echo (%time%) %serverName% started.
+
+::Launch parameters (edit end: -config=|-port=|-profiles=|-doLogs|-adminLog|-netLog|-freezeCheck|-filePatching|-BEpath=|-cpuCount=)
+start "DayZ Server" /min "DayZServer_x64.exe" -config=%serverConfig% -port=%serverPort% "-profiles=config" {mods_param} -cpuCount=%serverCPU% {flags_str}
+
+::Time in seconds before kill server process
+timeout {self.spin_timeout.value()}
 
 taskkill /im DayZServer_x64.exe /F
 
-::Time in seconds to wait before starting
-timeout 3
-
-echo (%time%) %serverName% started.
-
-::Launch parameters
-start "DayZ_Server" "DayZServer_x64.exe" -config=%serverConfig% -port=%serverPort% -cpuCount=%serverCPU% {flags_str}
-
-::Time in seconds before restart
-timeout {self.spin_timeout.value()}
+::Time in seconds to wait before restart
+timeout 10
 
 ::Go back to the top and repeat the whole cycle again
-goto launch
+goto start
 '''
         self.txt_preview.setText(content)
     
@@ -358,9 +458,133 @@ goto launch
             save_path.write_text(content, encoding="utf-8")
             self.bat_path = save_path
             self.lbl_current_file.setText(f"📄 {save_path}")
+            
+            # Also save mods.txt if using file method
+            if self.chk_use_mods_file.isChecked():
+                self._save_mods_file()
+            
             QMessageBox.information(self, tr("common.success"), tr("launcher.bat_saved"))
         except Exception as e:
             QMessageBox.critical(self, tr("common.error"), str(e))
+    
+    def _load_mods_from_server(self):
+        """Load mods from actual installed @folders in server directory."""
+        if not self.current_profile:
+            QMessageBox.warning(self, tr("common.warning"), tr("launcher.select_profile_first"))
+            return
+        
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+        
+        # Scan for @folders in server directory
+        mod_folders = []
+        try:
+            for item in server_path.iterdir():
+                if item.is_dir() and item.name.startswith("@"):
+                    mod_folders.append(item.name)
+        except Exception as e:
+            QMessageBox.critical(self, tr("common.error"), str(e))
+            return
+        
+        if not mod_folders:
+            QMessageBox.information(self, tr("common.info"), tr("launcher.no_installed_mods"))
+            return
+        
+        # Sort by priority (core/framework first)
+        mod_folders.sort(key=lambda x: (get_mod_priority(x), x.lower()))
+        
+        mods_str = self._format_mods_list(mod_folders)
+        self.txt_mods.setText(mods_str)
+        
+        QMessageBox.information(
+            self, 
+            tr("common.success"), 
+            f"{tr('launcher.mods_loaded')}: {len(mod_folders)}"
+        )
+
+    def _open_sort_dialog(self):
+        """Open dialog to manually sort mods order."""
+        mods_list = self._parse_mods_list(self.txt_mods.toPlainText())
+        if not mods_list:
+            QMessageBox.information(self, tr("common.info"), tr("launcher.no_mods_to_sort"))
+            return
+        
+        dialog = ModSortDialog(mods_list, self)
+        if dialog.exec() == QDialog.Accepted:
+            sorted_mods = dialog.get_sorted_mods()
+            mods_str = self._format_mods_list(sorted_mods)
+            self.txt_mods.setText(mods_str)
+
+    def apply_installed_mods_text(self, mods_text: str):
+        """Apply a new mods list text (typically after installation) and persist to mods.txt."""
+        normalized = self._format_mods_list(self._parse_mods_list(mods_text))
+        self.txt_mods.setText(normalized)
+        # Keep mods.txt in sync if a profile is active
+        if self.current_profile:
+            self._save_mods_file()
+    
+    def _save_mods_file(self):
+        """Save mods list to mods.txt file."""
+        if not self.current_profile:
+            return
+        
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            return
+        
+        mods_text = self._format_mods_list(self._parse_mods_list(self.txt_mods.toPlainText()))
+        mods_file = server_path / "mods.txt"
+        
+        try:
+            mods_file.write_text(mods_text, encoding="utf-8")
+        except Exception as e:
+            QMessageBox.warning(self, tr("common.warning"), str(e))
+    
+    def _load_mods_file(self):
+        """Load mods from existing mods.txt file."""
+        if not self.current_profile:
+            return
+        
+        server_path = Path(self.current_profile.get("server_path", ""))
+        mods_file = server_path / "mods.txt"
+        
+        if mods_file.exists():
+            try:
+                mods_text = mods_file.read_text(encoding="utf-8").strip()
+                # Normalize on load to avoid newline issues with `set /p` in batch.
+                normalized = self._format_mods_list(self._parse_mods_list(mods_text))
+                self.txt_mods.setText(normalized)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _parse_mods_list(text: str) -> list[str]:
+        """Parse mods text into a list of mod folder tokens."""
+        if not text:
+            return []
+        cleaned = text.replace("\r", "").replace("\n", ";")
+        parts = [p.strip().strip('"').strip() for p in cleaned.split(";")]
+        mods: list[str] = []
+        seen = set()
+        for part in parts:
+            if not part:
+                continue
+            key = part.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            mods.append(part)
+        return mods
+
+    @staticmethod
+    def _format_mods_list(mods: list[str]) -> str:
+        """Format a mods list as a single-line ';' separated string suitable for mods.txt."""
+        normalized = [m.strip().strip('"').strip() for m in (mods or []) if m and m.strip()]
+        if not normalized:
+            return ""
+        return ";".join(normalized) + ";"
     
     def update_texts(self):
         """Update UI texts for language change."""
@@ -369,3 +593,132 @@ goto launch
         self.btn_generate.setText(f"✨ {tr('launcher.generate_bat')}")
         self.btn_save.setText(f"💾 {tr('common.save')}")
         self.lbl_no_profile.setText(tr("launcher.select_profile_first"))
+        
+        # Update mods section
+        if hasattr(self, 'mods_box'):
+            self.mods_box.setTitle(tr("launcher.section.mods"))
+        if hasattr(self, 'chk_use_mods_file'):
+            self.chk_use_mods_file.setText(tr("launcher.use_mods_file"))
+        if hasattr(self, 'btn_load_from_server'):
+            self.btn_load_from_server.setText(f"📥 {tr('launcher.load_installed_mods')}")
+        if hasattr(self, 'btn_sort_mods'):
+            self.btn_sort_mods.setText(f"📊 {tr('launcher.sort_mods')}")
+
+
+class ModSortDialog(QDialog):
+    """Dialog for manually sorting mod load order with drag-drop and up/down buttons."""
+    
+    def __init__(self, mods_list: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("launcher.sort_mods_title"))
+        self.setMinimumSize(500, 450)
+        self.setModal(True)
+        
+        self._setup_ui(mods_list)
+    
+    def _setup_ui(self, mods_list: list):
+        layout = QVBoxLayout(self)
+        
+        # Instructions
+        info_label = QLabel(tr("launcher.sort_mods_info"))
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: gray; padding: 5px;")
+        layout.addWidget(info_label)
+        
+        # Main content area
+        content_layout = QHBoxLayout()
+        
+        # Mods list with drag-drop
+        self.mods_list = QListWidget()
+        self.mods_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.mods_list.setDefaultDropAction(Qt.MoveAction)
+        self.mods_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        
+        # Add items with priority indicators
+        for mod in mods_list:
+            item = QListWidgetItem(mod)
+            priority = get_mod_priority(mod)
+            if priority < len(MOD_PRIORITY_KEYWORDS):
+                # Core/Framework mod - highlight
+                item.setForeground(QColor("#4CAF50"))  # Green for priority mods
+                item.setToolTip(tr("launcher.priority_mod"))
+            self.mods_list.addItem(item)
+        
+        content_layout.addWidget(self.mods_list, stretch=1)
+        
+        # Buttons for up/down/auto-sort
+        btn_layout = QVBoxLayout()
+        btn_layout.addStretch()
+        
+        self.btn_up = QPushButton("⬆️")
+        self.btn_up.setFixedWidth(40)
+        self.btn_up.setToolTip(tr("launcher.move_up"))
+        self.btn_up.clicked.connect(self._move_up)
+        btn_layout.addWidget(self.btn_up)
+        
+        self.btn_down = QPushButton("⬇️")
+        self.btn_down.setFixedWidth(40)
+        self.btn_down.setToolTip(tr("launcher.move_down"))
+        self.btn_down.clicked.connect(self._move_down)
+        btn_layout.addWidget(self.btn_down)
+        
+        btn_layout.addSpacing(20)
+        
+        self.btn_auto_sort = QPushButton("🔄")
+        self.btn_auto_sort.setFixedWidth(40)
+        self.btn_auto_sort.setToolTip(tr("launcher.auto_sort"))
+        self.btn_auto_sort.clicked.connect(self._auto_sort)
+        btn_layout.addWidget(self.btn_auto_sort)
+        
+        btn_layout.addStretch()
+        content_layout.addLayout(btn_layout)
+        
+        layout.addLayout(content_layout)
+        
+        # Legend
+        legend_layout = QHBoxLayout()
+        legend_label = QLabel(f"🟢 {tr('launcher.priority_legend')}")
+        legend_label.setStyleSheet("color: #4CAF50; font-size: 11px;")
+        legend_layout.addWidget(legend_label)
+        legend_layout.addStretch()
+        layout.addLayout(legend_layout)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+    
+    def _move_up(self):
+        """Move selected item up."""
+        row = self.mods_list.currentRow()
+        if row > 0:
+            item = self.mods_list.takeItem(row)
+            self.mods_list.insertItem(row - 1, item)
+            self.mods_list.setCurrentRow(row - 1)
+    
+    def _move_down(self):
+        """Move selected item down."""
+        row = self.mods_list.currentRow()
+        if row < self.mods_list.count() - 1:
+            item = self.mods_list.takeItem(row)
+            self.mods_list.insertItem(row + 1, item)
+            self.mods_list.setCurrentRow(row + 1)
+    
+    def _auto_sort(self):
+        """Auto-sort mods by priority (core/framework first)."""
+        mods = [self.mods_list.item(i).text() for i in range(self.mods_list.count())]
+        mods.sort(key=lambda x: (get_mod_priority(x), x.lower()))
+        
+        self.mods_list.clear()
+        for mod in mods:
+            item = QListWidgetItem(mod)
+            priority = get_mod_priority(mod)
+            if priority < len(MOD_PRIORITY_KEYWORDS):
+                item.setForeground(QColor("#4CAF50"))
+                item.setToolTip(tr("launcher.priority_mod"))
+            self.mods_list.addItem(item)
+    
+    def get_sorted_mods(self) -> list:
+        """Return the mods in their current order."""
+        return [self.mods_list.item(i).text() for i in range(self.mods_list.count())]
