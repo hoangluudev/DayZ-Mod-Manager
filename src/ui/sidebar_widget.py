@@ -21,6 +21,12 @@ class SidebarWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(220)
+        # Icon size used for sidebar items (width, height)
+        # Reverted to original small size for menu icons
+        self._sidebar_icon_size = 20
+        # Logo size in pixels (used for app branding in the sidebar header)
+        # This should be slightly smaller than the sidebar width minus header margins
+        self._logo_size = 164
         self._items = []  # Store item data (icon_name, text)
         self._setup_ui()
     
@@ -29,25 +35,37 @@ class SidebarWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # App branding header
+        # App branding header (logo beside app title)
         self.header = QFrame()
         self.header.setObjectName("sidebarHeader")
-        header_layout = QVBoxLayout(self.header)
-        header_layout.setContentsMargins(16, 16, 16, 16)
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(12, 12, 12, 12)
+        header_layout.setSpacing(8)
 
+        # Logo on the left (scaled to fill most of the header width)
         self.logo_label = QLabel()
         self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setPixmap(Icons.get_app_logo_pixmap(size=72, variant="auto"))
+        self.logo_label.setFixedSize(self._logo_size, self._logo_size)
+        self.logo_label.setPixmap(Icons.get_app_logo_pixmap(size=self._logo_size, variant="auto"))
         header_layout.addWidget(self.logo_label)
-        
+
+        # Title column on the right
+        title_col = QVBoxLayout()
+        title_col.setContentsMargins(0, 0, 0, 0)
+        title_col.setSpacing(2)
+
         self.app_title = QLabel("DayZ")
-        self.app_title.setStyleSheet("color: white; font-size: 24px; font-weight: bold;")
-        header_layout.addWidget(self.app_title)
-        
+        self.app_title.setStyleSheet("color: white; font-size: 20px; font-weight: bold;")
+        self.app_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        title_col.addWidget(self.app_title)
+
         self.app_subtitle = QLabel("Mod Manager")
-        self.app_subtitle.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 12px;")
-        header_layout.addWidget(self.app_subtitle)
-        
+        self.app_subtitle.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 11px;")
+        self.app_subtitle.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        title_col.addWidget(self.app_subtitle)
+
+        header_layout.addLayout(title_col, stretch=1)
+
         layout.addWidget(self.header)
 
         # Keep the logo updated when the theme changes.
@@ -61,7 +79,8 @@ class SidebarWidget(QWidget):
         self.nav_list.setObjectName("sidebar")
         self.nav_list.setSpacing(2)
         self.nav_list.setFocusPolicy(Qt.NoFocus)
-        self.nav_list.setIconSize(QSize(20, 20))
+        # Keep sidebar menu icons at the original small size
+        self.nav_list.setIconSize(QSize(self._sidebar_icon_size, self._sidebar_icon_size))
         self.nav_list.currentRowChanged.connect(self._on_row_changed)
         
         layout.addWidget(self.nav_list, stretch=1)
@@ -75,15 +94,17 @@ class SidebarWidget(QWidget):
     def add_item(self, icon_name: str, text: str):
         """Add a navigation item with SVG icon."""
         item = QListWidgetItem(text)
+        # Keep the original item height for menu items
         item.setSizeHint(QSize(0, 44))
-        
-        # Set icon from Icons module
-        icon = Icons.get_icon(icon_name, size=20)
+
+        # Set icon from Icons module (small menu icon)
+        icon = Icons.get_icon(icon_name, size=self._sidebar_icon_size)
         item.setIcon(icon)
         
         font = QFont()
         font.setPointSize(11)
         item.setFont(font)
+        item.setTextAlignment(Qt.AlignVCenter)
         
         self.nav_list.addItem(item)
         self._items.append((icon_name, text))
@@ -101,7 +122,7 @@ class SidebarWidget(QWidget):
         item = self.nav_list.item(index)
         if item:
             item.setText(text)
-            icon = Icons.get_icon(icon_name, size=20)
+            icon = Icons.get_icon(icon_name, size=self._sidebar_icon_size)
             item.setIcon(icon)
             
             # Update stored data
@@ -113,14 +134,14 @@ class SidebarWidget(QWidget):
         for i, (icon_name, text) in enumerate(self._items):
             item = self.nav_list.item(i)
             if item:
-                icon = Icons.get_icon(icon_name, size=20)
+                icon = Icons.get_icon(icon_name, size=self._sidebar_icon_size)
                 item.setIcon(icon)
 
         self._refresh_logo()
 
     def _refresh_logo(self):
         try:
-            self.logo_label.setPixmap(Icons.get_app_logo_pixmap(size=72, variant="auto"))
+            self.logo_label.setPixmap(Icons.get_app_logo_pixmap(size=self._logo_size, variant="auto"))
         except Exception:
             pass
     
