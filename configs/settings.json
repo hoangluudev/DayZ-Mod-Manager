@@ -1,6 +1,7 @@
 {
-  "theme": "dark",
-  "language": "vi",
+  "theme": "system",
+  "language": "en",
+  "accent_color": "#43a047",
   "steamcmd_path": "",
   "workshop_path": "",
   "last_server_path": "",
@@ -12,10 +13,11 @@
   "start_minimized": false,
   "check_updates_on_startup": true,
   "auto_backup": true,
-  "confirm_actions": true,
-  "auto_copy_bikeys": true,
+  "confirm_actions": false,
+  "auto_copy_bikeys": false,
   "window_width": 1200,
   "window_height": 800,
-  "window_maximized": false,
+  "window_maximized": true,
+  "app_logo": "new_logo.png",
   "last_profile": ""
 }

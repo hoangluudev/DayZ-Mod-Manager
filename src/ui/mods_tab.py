@@ -20,6 +20,8 @@ from src.core.mod_integrity import ModIntegrityChecker
 from src.core.profile_manager import ProfileManager
 from src.core.settings_manager import SettingsManager
 from src.models.mod_models import ModStatus, IntegrityReport
+from src.ui.icons import Icons
+from src.ui.widgets.icon_button import IconButton
 from src.utils.locale_manager import tr
 
 
@@ -255,11 +257,11 @@ class ModsTab(QWidget):
         header.addWidget(self.lbl_title)
         header.addStretch()
         
-        self.btn_refresh = QPushButton(f"🔄 {tr('common.refresh')}")
+        self.btn_refresh = IconButton("refresh", text=tr("common.refresh"), size=18)
         self.btn_refresh.clicked.connect(self._refresh_all)
         header.addWidget(self.btn_refresh)
         
-        self.btn_copy_all_bikeys = QPushButton(f"🔑 {tr('mods.copy_all_bikeys')}")
+        self.btn_copy_all_bikeys = IconButton("key", text=tr("mods.copy_all_bikeys"), size=18)
         self.btn_copy_all_bikeys.clicked.connect(self._copy_all_bikeys)
         header.addWidget(self.btn_copy_all_bikeys)
         
@@ -292,7 +294,7 @@ class ModsTab(QWidget):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 8, 0)
         
-        self.workshop_box = QGroupBox(f"📦 {tr('mods.workshop_source')}")
+        self.workshop_box = QGroupBox(tr("mods.workshop_source"))
         workshop_layout = QVBoxLayout(self.workshop_box)
         
         # Workshop path label
@@ -304,7 +306,7 @@ class ModsTab(QWidget):
         # Search bar for workshop
         search_ws_layout = QHBoxLayout()
         self.search_workshop = QLineEdit()
-        self.search_workshop.setPlaceholderText(f"🔍 {tr('common.search')}...")
+        self.search_workshop.setPlaceholderText(f"{tr('common.search')}...")
         self.search_workshop.textChanged.connect(self._filter_workshop_table)
         self.search_workshop.setClearButtonEnabled(True)
         search_ws_layout.addWidget(self.search_workshop)
@@ -312,7 +314,7 @@ class ModsTab(QWidget):
         
         # Workshop actions
         ws_actions = QHBoxLayout()
-        self.btn_add_selected = QPushButton(f"➕ {tr('mods.add_to_server')}")
+        self.btn_add_selected = IconButton("plus", text=tr("mods.add_to_server"), size=18, object_name="primary")
         self.btn_add_selected.clicked.connect(self._add_selected_mods)
         ws_actions.addWidget(self.btn_add_selected)
         
@@ -353,7 +355,7 @@ class ModsTab(QWidget):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 0, 0, 0)
         
-        self.installed_box = QGroupBox(f"🖥️ {tr('mods.server_installed')}")
+        self.installed_box = QGroupBox(tr("mods.server_installed"))
         installed_layout = QVBoxLayout(self.installed_box)
         
         # Server path label
@@ -365,7 +367,7 @@ class ModsTab(QWidget):
         # Search bar for installed
         search_inst_layout = QHBoxLayout()
         self.search_installed = QLineEdit()
-        self.search_installed.setPlaceholderText(f"🔍 {tr('common.search')}...")
+        self.search_installed.setPlaceholderText(f"{tr('common.search')}...")
         self.search_installed.textChanged.connect(self._filter_installed_table)
         self.search_installed.setClearButtonEnabled(True)
         search_inst_layout.addWidget(self.search_installed)
@@ -373,12 +375,11 @@ class ModsTab(QWidget):
         
         # Installed actions
         inst_actions = QHBoxLayout()
-        self.btn_remove_selected = QPushButton(f"➖ {tr('mods.remove_from_server')}")
+        self.btn_remove_selected = IconButton("trash", text=tr("mods.remove_from_server"), size=18, object_name="danger")
         self.btn_remove_selected.clicked.connect(self._remove_selected_mods)
-        self.btn_remove_selected.setStyleSheet("color: #f44336;")
         inst_actions.addWidget(self.btn_remove_selected)
         
-        self.btn_update_selected = QPushButton(f"🔄 {tr('mods.update_selected')}")
+        self.btn_update_selected = IconButton("refresh", text=tr("mods.update_selected"), size=18)
         self.btn_update_selected.clicked.connect(self._update_selected_mods)
         inst_actions.addWidget(self.btn_update_selected)
         
@@ -444,8 +445,8 @@ class ModsTab(QWidget):
         # Update path labels
         workshop_path = profile_data.get("workshop_path", "")
         server_path = profile_data.get("server_path", "")
-        self.lbl_workshop_path.setText(f"📁 {workshop_path}" if workshop_path else "")
-        self.lbl_server_path.setText(f"📁 {server_path}" if server_path else "")
+        self.lbl_workshop_path.setText(workshop_path or "")
+        self.lbl_server_path.setText(server_path or "")
         
         # Load both lists
         self._refresh_all()
@@ -539,18 +540,25 @@ class ModsTab(QWidget):
                     # Check if versions differ
                     installed_ver = installed_mods.get(mod_folder.lower())
                     if version and installed_ver and version != installed_ver:
-                        status_text = f"🔄 {tr('mods.status_outdated')}"
+                        status_text = tr('mods.status_outdated')
+                        status_icon = Icons.get_icon("refresh", size=16)
                         status_color = "#2196f3"
                     else:
-                        status_text = f"✅ {tr('mods.status_installed')}"
+                        status_text = tr('mods.status_installed')
+                        status_icon = Icons.get_icon("success", size=16)
                         status_color = "#4caf50"
                 else:
-                    status_text = f"⬜ {tr('mods.status_not_installed')}"
+                    status_text = tr('mods.status_not_installed')
+                    status_icon = Icons.get_icon("info", size=16)
                     status_color = "#888"
                 
                 status_item = QTableWidgetItem(status_text)
                 status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
                 status_item.setForeground(QColor(status_color))
+                try:
+                    status_item.setIcon(status_icon)
+                except Exception:
+                    pass
                 self.workshop_table.setItem(row, 4, status_item)
             
             self._update_ws_count()
@@ -616,31 +624,38 @@ class ModsTab(QWidget):
                 
                 # Bikey status
                 if not mod_bikeys:
-                    bikey_text = "⚪ N/A"
+                    bikey_text = "N/A"
+                    bikey_icon = Icons.get_icon("info", size=16)
                     bikey_color = "#888888"
                 elif has_bikey:
-                    bikey_text = f"✅ {tr('mods.status_installed')}"
+                    bikey_text = tr('mods.status_installed')
+                    bikey_icon = Icons.get_icon("success", size=16)
                     bikey_color = "#4caf50"
                 else:
-                    bikey_text = f"❌ {tr('mods.status_missing_bikey')}"
+                    bikey_text = tr('mods.status_missing_bikey')
+                    bikey_icon = Icons.get_icon("error", size=16)
                     bikey_color = "#f44336"
                 
                 bikey_item = QTableWidgetItem(bikey_text)
                 bikey_item.setFlags(bikey_item.flags() & ~Qt.ItemIsEditable)
                 bikey_item.setForeground(QColor(bikey_color))
                 bikey_item.setToolTip("\n".join(mod_bikeys) if mod_bikeys else "No bikey files in mod")
+                try:
+                    bikey_item.setIcon(bikey_icon)
+                except Exception:
+                    pass
                 self.installed_table.setItem(row, 4, bikey_item)
                 
                 # Remove button
-                btn_remove = QPushButton(f"🗑️ {tr('common.remove')}")
-                btn_remove.setStyleSheet("color: #f44336; font-size: 11px;")
-                btn_remove.clicked.connect(lambda checked, mf=mod_folder: self._remove_single_mod(mf))
+                btn_remove = IconButton("trash", icon_only=True, size=16, object_name="danger")
+                btn_remove.setToolTip(tr("common.remove"))
+                btn_remove.clicked.connect(lambda checked=False, mf=mod_folder: self._remove_single_mod(mf))
                 self.installed_table.setCellWidget(row, 5, btn_remove)
             
             self._update_inst_count()
-            
-            # Sync mods.txt
-            self._sync_mods_txt_with_installed()
+
+            # Initialize mods.txt only if missing/empty (do not overwrite user order)
+            self._maybe_initialize_mods_txt_from_installed()
         finally:
             self._populating = False
     
@@ -954,15 +969,15 @@ class ModsTab(QWidget):
         # Build result message
         parts = []
         if results["success"]:
-            parts.append(f"✅ {tr('common.success')}: {len(results['success'])}")
+            parts.append(f"{tr('common.success')}: {len(results['success'])}")
         if results["failed"]:
-            parts.append(f"❌ {tr('mods.install_failed')}: {len(results['failed'])}")
+            parts.append(f"{tr('mods.install_failed')}: {len(results['failed'])}")
             for mod, reason in results["failed"][:3]:
                 parts.append(f"   - {mod}: {reason}")
         if results["bikeys_copied"]:
-            parts.append(f"🔑 {tr('mods.bikeys_copied')}: {len(results['bikeys_copied'])}")
+            parts.append(f"{tr('mods.bikeys_copied')}: {len(results['bikeys_copied'])}")
         if results["bikeys_removed"]:
-            parts.append(f"🔑 Bikeys removed: {len(results['bikeys_removed'])}")
+            parts.append(f"Bikeys removed: {len(results['bikeys_removed'])}")
         
         if parts:
             QMessageBox.information(self, tr("common.success"), "\n".join(parts))
@@ -1002,8 +1017,12 @@ class ModsTab(QWidget):
         cleaned = [m.strip().strip('"').strip() for m in mods if m and m.strip()]
         return ";".join(cleaned) + ";" if cleaned else ""
     
-    def _sync_mods_txt_with_installed(self):
-        """Write server/mods.txt and emit signal."""
+    def _maybe_initialize_mods_txt_from_installed(self):
+        """Initialize server/mods.txt from installed mods only if missing or empty.
+
+        Important: Do NOT overwrite an existing mods.txt because the user may have
+        a curated load order (sorting) that must be preserved.
+        """
         if not self.current_profile:
             return
         
@@ -1012,11 +1031,22 @@ class ModsTab(QWidget):
             return
         
         server_path = Path(server_path_str)
+        mods_file = server_path / "mods.txt"
+
+        try:
+            if mods_file.exists():
+                existing = mods_file.read_text(encoding="utf-8", errors="replace").strip()
+                if existing:
+                    return
+        except Exception:
+            # If we can't read it, don't risk overwriting.
+            return
+
         mods = self._get_installed_mod_folders()
         mods_text = self._format_mods_txt(mods)
-        
+
         try:
-            (server_path / "mods.txt").write_text(mods_text, encoding="utf-8")
+            mods_file.write_text(mods_text, encoding="utf-8")
         except Exception:
             pass
         
@@ -1025,20 +1055,20 @@ class ModsTab(QWidget):
     def update_texts(self):
         """Update UI texts for language change."""
         self.lbl_title.setText(f"<h2>{tr('mods.title')}</h2>")
-        self.btn_refresh.setText(f"🔄 {tr('common.refresh')}")
-        self.btn_copy_all_bikeys.setText(f"🔑 {tr('mods.copy_all_bikeys')}")
+        self.btn_refresh.setText(tr("common.refresh"))
+        self.btn_copy_all_bikeys.setText(tr("mods.copy_all_bikeys"))
         self.lbl_no_profile.setText(tr("mods.select_profile_first"))
-        self.workshop_box.setTitle(f"📦 {tr('mods.workshop_source')}")
-        self.installed_box.setTitle(f"🖥️ {tr('mods.server_installed')}")
-        self.btn_add_selected.setText(f"➕ {tr('mods.add_to_server')}")
-        self.btn_remove_selected.setText(f"➖ {tr('mods.remove_from_server')}")
-        self.btn_update_selected.setText(f"🔄 {tr('mods.update_selected')}")
+        self.workshop_box.setTitle(tr("mods.workshop_source"))
+        self.installed_box.setTitle(tr("mods.server_installed"))
+        self.btn_add_selected.setText(tr("mods.add_to_server"))
+        self.btn_remove_selected.setText(tr("mods.remove_from_server"))
+        self.btn_update_selected.setText(tr("mods.update_selected"))
         self.btn_select_all_ws.setText(tr("common.select_all"))
         self.btn_deselect_all_ws.setText(tr("common.deselect_all"))
         self.btn_select_all_inst.setText(tr("common.select_all"))
         self.btn_deselect_all_inst.setText(tr("common.deselect_all"))
-        self.search_workshop.setPlaceholderText(f"🔍 {tr('common.search')}...")
-        self.search_installed.setPlaceholderText(f"🔍 {tr('common.search')}...")
+        self.search_workshop.setPlaceholderText(f"{tr('common.search')}...")
+        self.search_installed.setPlaceholderText(f"{tr('common.search')}...")
         
         # Update table headers
         self.workshop_table.setHorizontalHeaderLabels([

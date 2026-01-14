@@ -23,6 +23,7 @@ class AppSettings:
     # Appearance
     theme: str = "dark"
     language: str = "en"
+    accent_color: str = "#0078d4"  # Primary accent color
     
     # Paths
     steamcmd_path: str = ""
@@ -52,6 +53,8 @@ class AppSettings:
     
     # Last used profile
     last_profile: str = ""
+    # App branding
+    app_logo: str = "new_logo.png"  # filename under assets/icons (can be overridden)
 
 
 class SettingsManager:

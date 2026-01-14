@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QLabel, QPushButton, QStatusBar, QMenuBar, QMenu,
-    QMessageBox, QFileDialog, QComboBox, QSplitter, QFrame
+    QMessageBox, QFileDialog, QComboBox, QSplitter, QFrame, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QAction, QIcon
@@ -31,9 +31,11 @@ from src.ui.sidebar_widget import SidebarWidget
 from src.ui.theme_manager import ThemeManager
 from src.ui.profiles_tab import ProfilesTab
 from src.ui.mods_tab import ModsTab
-from src.ui.launcher_tab import LauncherTab
-from src.ui.config_tab import ConfigTab
+from src.ui.unified_config_tab import UnifiedConfigTab
 from src.ui.settings_tab import SettingsTab
+from src.ui.icons import Icons
+from src.ui.widgets import IconButton
+from src.ui.config_manager import UnsavedChangesDialog
 
 
 class ProcessManager:
@@ -95,9 +97,8 @@ class MainWindow(QMainWindow):
     # Tab indices
     TAB_PROFILES = 0
     TAB_MODS = 1
-    TAB_LAUNCHER = 2
-    TAB_CONFIG = 3
-    TAB_SETTINGS = 4
+    TAB_CONFIG = 2
+    TAB_SETTINGS = 3
     
     def __init__(self):
         super().__init__()
@@ -120,8 +121,9 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._update_texts()
         
-        # Apply theme from settings
-        ThemeManager.apply_theme(self.settings.settings.theme)
+        # Apply theme from settings with accent color
+        accent = self.settings.settings.accent_color or "#0078d4"
+        ThemeManager.apply_theme(self.settings.settings.theme, accent)
         
         # Restore window state
         self._restore_window_state()
@@ -142,12 +144,11 @@ class MainWindow(QMainWindow):
         self.sidebar = SidebarWidget()
         self.sidebar.set_footer_text(f"v{get_version()}")
         
-        # Add navigation items
-        self.sidebar.add_item("📂", tr("tabs.profiles"))
-        self.sidebar.add_item("🧩", tr("tabs.mods"))
-        self.sidebar.add_item("🚀", tr("tabs.launcher"))
-        self.sidebar.add_item("⚙️", tr("tabs.config"))
-        self.sidebar.add_item("🔧", tr("tabs.settings"))
+        # Add navigation items with icon names (not emoji)
+        self.sidebar.add_item("folder", tr("tabs.profiles"))
+        self.sidebar.add_item("puzzle", tr("tabs.mods"))
+        self.sidebar.add_item("cog", tr("tabs.config"))
+        self.sidebar.add_item("settings", tr("tabs.settings"))
         
         self.sidebar.set_current_index(0)
         self.sidebar.item_selected.connect(self._on_sidebar_item_selected)
@@ -179,9 +180,12 @@ class MainWindow(QMainWindow):
         
         profile_bar_layout.addStretch()
         
-        # Theme toggle button
-        self.btn_theme = QPushButton("🌙")
-        self.btn_theme.setFixedSize(32, 32)
+        # Theme toggle button with SVG icon
+        self.btn_theme = IconButton(
+            icon_name="moon" if self.settings.settings.theme == "dark" else "sun",
+            size=20,
+            icon_only=True
+        )
         self.btn_theme.setToolTip(tr("settings.theme"))
         self.btn_theme.clicked.connect(self._toggle_theme)
         profile_bar_layout.addWidget(self.btn_theme)
@@ -194,14 +198,12 @@ class MainWindow(QMainWindow):
         # Create page instances
         self.tab_profiles = ProfilesTab()
         self.tab_mods = ModsTab()
-        self.tab_launcher = LauncherTab()
-        self.tab_config = ConfigTab()
+        self.tab_config = UnifiedConfigTab()
         self.tab_settings = SettingsTab()
         
         # Add pages to stack
         self.stack.addWidget(self.tab_profiles)
         self.stack.addWidget(self.tab_mods)
-        self.stack.addWidget(self.tab_launcher)
         self.stack.addWidget(self.tab_config)
         self.stack.addWidget(self.tab_settings)
         
@@ -257,9 +259,6 @@ class MainWindow(QMainWindow):
         """Connect signals between tabs."""
         # Profile selection updates other tabs
         self.tab_profiles.profile_selected.connect(self._on_profile_selected)
-
-        # Mods installation -> update Launcher mods list/mods.txt
-        self.tab_mods.mods_list_updated.connect(self.tab_launcher.apply_installed_mods_text)
         
         # Settings language change
         self.tab_settings.language_changed.connect(self._update_all_texts)
@@ -270,6 +269,22 @@ class MainWindow(QMainWindow):
     
     def _on_sidebar_item_selected(self, index: int):
         """Handle sidebar navigation item selection."""
+        # Check for unsaved changes if leaving config tab
+        current_index = self.stack.currentIndex()
+        if current_index == self.TAB_CONFIG and self.tab_config.has_unsaved_changes():
+            dialog = UnsavedChangesDialog(self)
+            if dialog.exec() == QDialog.Accepted:
+                action = dialog.get_result()
+                if action == UnsavedChangesDialog.SAVE:
+                    self.tab_config._preview_and_save()
+                elif action == UnsavedChangesDialog.CANCEL:
+                    # Stay on current tab
+                    self.sidebar.set_current_index(current_index)
+                    return
+                elif action == UnsavedChangesDialog.DISCARD:
+                    self.tab_config.discard_changes()
+                # else: continue
+        
         self.stack.setCurrentIndex(index)
     
     def _on_profile_selected(self, profile_data: dict):
@@ -277,13 +292,12 @@ class MainWindow(QMainWindow):
         self.current_profile = profile_data
         
         # Update other tabs with selected profile
-        self.tab_mods.set_profile(profile_data)
-        self.tab_launcher.set_profile(profile_data)
         self.tab_config.set_profile(profile_data)
+        self.tab_mods.set_profile(profile_data)
         
         # Update profile indicator
         profile_name = profile_data.get("name", "")
-        self.lbl_current_profile.setText(f"📂 {tr('profiles.current')}: {profile_name}")
+        self.lbl_current_profile.setText(f"{tr('profiles.current')}: {profile_name}")
         self.status_bar.showMessage(f"{tr('profiles.current')}: {profile_name}")
     
     def _toggle_theme(self):
@@ -291,24 +305,35 @@ class MainWindow(QMainWindow):
         current = self.settings.settings.theme
         if current == "dark":
             new_theme = "light"
-            self.btn_theme.setText("☀️")
+            self.btn_theme.set_icon("sun")
         else:
             new_theme = "dark"
-            self.btn_theme.setText("🌙")
+            self.btn_theme.set_icon("moon")
         
         self._set_theme(new_theme)
     
     def _set_theme(self, theme: str):
         """Set application theme."""
-        ThemeManager.apply_theme(theme)
+        accent = self.settings.settings.accent_color or "#0078d4"
+        ThemeManager.apply_theme(theme, accent)
         self.settings.settings.theme = theme
         self.settings.save()
         
         # Update button icon
         if theme == "light":
-            self.btn_theme.setText("☀️")
+            self.btn_theme.set_icon("sun")
         else:
-            self.btn_theme.setText("🌙")
+            self.btn_theme.set_icon("moon")
+        
+        # Refresh sidebar icons
+        self.sidebar.refresh_icons()
+
+        # Refresh theme-aware logos (e.g., About tab)
+        try:
+            if hasattr(self.tab_settings, "tab_about"):
+                self.tab_settings.tab_about.update_texts()
+        except Exception:
+            pass
     
     def _on_theme_changed(self, theme: str):
         """Handle theme change from settings tab."""
@@ -319,12 +344,11 @@ class MainWindow(QMainWindow):
         # Window title
         self.setWindowTitle(f"{tr('app.title')} v{get_version()}")
         
-        # Sidebar items
-        self.sidebar.update_item_text(0, "📂", tr("tabs.profiles"))
-        self.sidebar.update_item_text(1, "🧩", tr("tabs.mods"))
-        self.sidebar.update_item_text(2, "🚀", tr("tabs.launcher"))
-        self.sidebar.update_item_text(3, "⚙️", tr("tabs.config"))
-        self.sidebar.update_item_text(4, "🔧", tr("tabs.settings"))
+        # Sidebar items with icon names
+        self.sidebar.update_item_text(0, "folder", tr("tabs.profiles"))
+        self.sidebar.update_item_text(1, "puzzle", tr("tabs.mods"))
+        self.sidebar.update_item_text(2, "cog", tr("tabs.config"))
+        self.sidebar.update_item_text(3, "settings", tr("tabs.settings"))
         
         # Menus
         self.menu_file.setTitle(tr("menu.file"))
@@ -338,10 +362,10 @@ class MainWindow(QMainWindow):
         # Profile bar
         if self.current_profile:
             profile_name = self.current_profile.get("name", "")
-            self.lbl_current_profile.setText(f"📂 {tr('profiles.current')}: {profile_name}")
+            self.lbl_current_profile.setText(f"{tr('profiles.current')}: {profile_name}")
             self.status_bar.showMessage(f"{tr('profiles.current')}: {profile_name}")
         else:
-            self.lbl_current_profile.setText(f"📂 {tr('profiles.no_profiles')}")
+            self.lbl_current_profile.setText(f"{tr('profiles.no_profiles')}")
             self.status_bar.showMessage(tr("common.success"))
     
     def _update_all_texts(self):
@@ -349,7 +373,6 @@ class MainWindow(QMainWindow):
         self._update_texts()
         self.tab_profiles.update_texts()
         self.tab_mods.update_texts()
-        self.tab_launcher.update_texts()
         self.tab_config.update_texts()
         self.tab_settings.update_texts()
     
@@ -411,11 +434,15 @@ def main():
     app.setApplicationName(get_app_name())
     app.setOrganizationName("DayzModManager")
     app.setApplicationVersion(get_version())
+
+    # App/window icon (runtime). The embedded EXE icon is configured in the PyInstaller spec.
+    app.setWindowIcon(Icons.get_app_icon())
     
     # Set application style
     app.setStyle("Fusion")
     
     window = MainWindow()
+    window.setWindowIcon(Icons.get_app_icon())
     window.show()
     
     sys.exit(app.exec())

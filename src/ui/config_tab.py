@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint
 
+from src.ui.widgets import IconButton
 from src.utils.locale_manager import tr
 
 
@@ -258,15 +259,15 @@ class ConfigTab(QWidget):
         header.addWidget(self.lbl_title)
         header.addStretch()
         
-        self.btn_load = QPushButton(f"📂 {tr('config.load')}")
+        self.btn_load = IconButton("browse", tr("config.load"), size=16)
         self.btn_load.clicked.connect(self._load_config)
         header.addWidget(self.btn_load)
         
-        self.btn_restore = QPushButton(f"🔄 {tr('settings.restore_defaults')}")
+        self.btn_restore = IconButton("restore", tr("settings.restore_defaults"), size=16)
         self.btn_restore.clicked.connect(self._restore_defaults)
         header.addWidget(self.btn_restore)
         
-        self.btn_save = QPushButton(f"💾 {tr('common.save')}")
+        self.btn_save = IconButton("save", tr("common.save"), size=16)
         self.btn_save.clicked.connect(self._save_config)
         header.addWidget(self.btn_save)
         
@@ -459,7 +460,7 @@ class ConfigTab(QWidget):
         try:
             content = path.read_text(encoding="utf-8")
             self.cfg_path = path
-            self.lbl_current_file.setText(f"📄 {path}")
+            self.lbl_current_file.setText(str(path))
             
             # Parse each field
             for field_name, widget in self.widgets.items():
@@ -521,7 +522,7 @@ class ConfigTab(QWidget):
         self.current_mission = "dayzOffline.chernarusplus"
         
         self.cfg_path = None
-        self.lbl_current_file.setText(f"✨ {tr('config.new_config')}")
+        self.lbl_current_file.setText(tr('config.new_config'))
     
     def _on_map_changed(self, index):
         """Handle map selection change."""
@@ -550,7 +551,7 @@ class ConfigTab(QWidget):
             content = self._generate_cfg_content()
             save_path.write_text(content, encoding="utf-8")
             self.cfg_path = save_path
-            self.lbl_current_file.setText(f"📄 {save_path}")
+            self.lbl_current_file.setText(str(save_path))
             QMessageBox.information(self, tr("common.success"), tr("config.saved"))
         except Exception as e:
             QMessageBox.critical(self, tr("common.error"), str(e))
@@ -600,9 +601,9 @@ class ConfigTab(QWidget):
     def update_texts(self):
         """Update UI texts for language change."""
         self.lbl_title.setText(f"<h2>{tr('config.title')}</h2>")
-        self.btn_load.setText(f"📂 {tr('config.load')}")
-        self.btn_restore.setText(f"🔄 {tr('settings.restore_defaults')}")
-        self.btn_save.setText(f"💾 {tr('common.save')}")
+        self.btn_load.setText(tr("config.load"))
+        self.btn_restore.setText(tr("settings.restore_defaults"))
+        self.btn_save.setText(tr("common.save"))
         self.lbl_no_profile.setText(tr("config.select_profile_first"))
         
         # Update mission section

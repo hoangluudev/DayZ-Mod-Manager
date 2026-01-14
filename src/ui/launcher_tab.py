@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
+from src.ui.widgets import IconButton
 from src.utils.locale_manager import tr
 from src.core.default_restore import default_start_bat_template
 
@@ -70,15 +71,15 @@ class LauncherTab(QWidget):
         header.addWidget(self.lbl_title)
         header.addStretch()
         
-        self.btn_load = QPushButton(f"📂 {tr('launcher.load_bat')}")
+        self.btn_load = IconButton("browse", tr("launcher.load_bat"), size=16)
         self.btn_load.clicked.connect(self._load_bat)
         header.addWidget(self.btn_load)
         
-        self.btn_generate = QPushButton(f"✨ {tr('launcher.generate_bat')}")
+        self.btn_generate = IconButton("restore", tr("launcher.generate_bat"), size=16)
         self.btn_generate.clicked.connect(self._generate_from_default)
         header.addWidget(self.btn_generate)
         
-        self.btn_save = QPushButton(f"💾 {tr('common.save')}")
+        self.btn_save = IconButton("save", tr("common.save"), size=16)
         self.btn_save.clicked.connect(self._save_bat)
         header.addWidget(self.btn_save)
         
@@ -190,16 +191,16 @@ class LauncherTab(QWidget):
         method_layout.addStretch()
         
         # Load installed mods from server folder
-        self.btn_load_from_server = QPushButton(f"📥 {tr('launcher.load_installed_mods')}")
+        self.btn_load_from_server = IconButton("download", tr("launcher.load_installed_mods"), size=14)
         self.btn_load_from_server.clicked.connect(self._load_mods_from_server)
         method_layout.addWidget(self.btn_load_from_server)
         
         # Sorting button
-        self.btn_sort_mods = QPushButton(f"📊 {tr('launcher.sort_mods')}")
+        self.btn_sort_mods = IconButton("sort", tr("launcher.sort_mods"), size=14)
         self.btn_sort_mods.clicked.connect(self._open_sort_dialog)
         method_layout.addWidget(self.btn_sort_mods)
         
-        self.btn_save_mods_file = QPushButton(f"💾 {tr('launcher.save_mods_file')}")
+        self.btn_save_mods_file = IconButton("save", tr("launcher.save_mods_file"), size=14)
         self.btn_save_mods_file.clicked.connect(self._save_mods_file)
         method_layout.addWidget(self.btn_save_mods_file)
         
@@ -285,7 +286,7 @@ class LauncherTab(QWidget):
         try:
             content = path.read_text(encoding="utf-8")
             self.bat_path = path
-            self.lbl_current_file.setText(f"📄 {path}")
+            self.lbl_current_file.setText(str(path))
             
             # Parse variables
             self._parse_bat_content(content)
@@ -341,7 +342,7 @@ class LauncherTab(QWidget):
         if template_path.exists():
             self._load_bat_file(template_path)
             self.bat_path = None  # Clear so save goes to server folder
-            self.lbl_current_file.setText(f"✨ {tr('launcher.new_from_template')}")
+            self.lbl_current_file.setText(tr('launcher.new_from_template'))
             
             # Update location from profile
             if self.current_profile:
@@ -457,7 +458,7 @@ goto start
             content = self.txt_preview.toPlainText()
             save_path.write_text(content, encoding="utf-8")
             self.bat_path = save_path
-            self.lbl_current_file.setText(f"📄 {save_path}")
+            self.lbl_current_file.setText(str(save_path))
             
             # Also save mods.txt if using file method
             if self.chk_use_mods_file.isChecked():
@@ -589,9 +590,9 @@ goto start
     def update_texts(self):
         """Update UI texts for language change."""
         self.lbl_title.setText(f"<h2>{tr('launcher.title')}</h2>")
-        self.btn_load.setText(f"📂 {tr('launcher.load_bat')}")
-        self.btn_generate.setText(f"✨ {tr('launcher.generate_bat')}")
-        self.btn_save.setText(f"💾 {tr('common.save')}")
+        self.btn_load.setText(tr("launcher.load_bat"))
+        self.btn_generate.setText(tr("launcher.generate_bat"))
+        self.btn_save.setText(tr("common.save"))
         self.lbl_no_profile.setText(tr("launcher.select_profile_first"))
         
         # Update mods section
@@ -600,9 +601,11 @@ goto start
         if hasattr(self, 'chk_use_mods_file'):
             self.chk_use_mods_file.setText(tr("launcher.use_mods_file"))
         if hasattr(self, 'btn_load_from_server'):
-            self.btn_load_from_server.setText(f"📥 {tr('launcher.load_installed_mods')}")
+            self.btn_load_from_server.setText(tr("launcher.load_installed_mods"))
         if hasattr(self, 'btn_sort_mods'):
-            self.btn_sort_mods.setText(f"📊 {tr('launcher.sort_mods')}")
+            self.btn_sort_mods.setText(tr("launcher.sort_mods"))
+        if hasattr(self, 'btn_save_mods_file'):
+            self.btn_save_mods_file.setText(tr("launcher.save_mods_file"))
 
 
 class ModSortDialog(QDialog):
@@ -650,13 +653,13 @@ class ModSortDialog(QDialog):
         btn_layout = QVBoxLayout()
         btn_layout.addStretch()
         
-        self.btn_up = QPushButton("⬆️")
+        self.btn_up = IconButton("arrow_up", icon_only=True, size=18)
         self.btn_up.setFixedWidth(40)
         self.btn_up.setToolTip(tr("launcher.move_up"))
         self.btn_up.clicked.connect(self._move_up)
         btn_layout.addWidget(self.btn_up)
         
-        self.btn_down = QPushButton("⬇️")
+        self.btn_down = IconButton("arrow_down", icon_only=True, size=18)
         self.btn_down.setFixedWidth(40)
         self.btn_down.setToolTip(tr("launcher.move_down"))
         self.btn_down.clicked.connect(self._move_down)
@@ -664,7 +667,7 @@ class ModSortDialog(QDialog):
         
         btn_layout.addSpacing(20)
         
-        self.btn_auto_sort = QPushButton("🔄")
+        self.btn_auto_sort = IconButton("sort", icon_only=True, size=18)
         self.btn_auto_sort.setFixedWidth(40)
         self.btn_auto_sort.setToolTip(tr("launcher.auto_sort"))
         self.btn_auto_sort.clicked.connect(self._auto_sort)
@@ -677,7 +680,7 @@ class ModSortDialog(QDialog):
         
         # Legend
         legend_layout = QHBoxLayout()
-        legend_label = QLabel(f"🟢 {tr('launcher.priority_legend')}")
+        legend_label = QLabel(tr('launcher.priority_legend'))
         legend_label.setStyleSheet("color: #4CAF50; font-size: 11px;")
         legend_layout.addWidget(legend_label)
         legend_layout.addStretch()

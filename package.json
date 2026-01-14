@@ -1,0 +1,11 @@
+{
+  "name": "dayzmodmanager",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "start": "cmd /c python main.py",
+    "build:prod": "cmd /c build.bat prod nopause",
+    "build:dev": "cmd /c build.bat dev nopause",
+    "clean": "cmd /c build.bat clean nopause"
+  }
+}

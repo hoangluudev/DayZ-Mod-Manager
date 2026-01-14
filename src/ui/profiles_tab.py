@@ -12,6 +12,8 @@ from PySide6.QtCore import Qt, Signal
 from src.core.profile_manager import ProfileManager
 from src.utils.locale_manager import tr
 from src.ui.profile_dialog import ProfileDialog
+from src.ui.icons import Icons
+from src.ui.widgets import IconButton
 
 
 class ProfileCard(QFrame):
@@ -27,18 +29,6 @@ class ProfileCard(QFrame):
         self.name = profile_data.get("name", "Unknown")
         
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        self.setStyleSheet("""
-            ProfileCard {
-                background-color: #3c3c3c;
-                border: 1px solid #555;
-                border-radius: 8px;
-                padding: 10px;
-            }
-            ProfileCard:hover {
-                background-color: #454545;
-                border-color: #0078d4;
-            }
-        """)
         self.setCursor(Qt.PointingHandCursor)
         
         self._setup_ui()
@@ -51,30 +41,47 @@ class ProfileCard(QFrame):
         header = QHBoxLayout()
         
         self.lbl_name = QLabel(f"<b>{self.name}</b>")
-        self.lbl_name.setStyleSheet("font-size: 14px; color: white;")
+        self.lbl_name.setStyleSheet("font-size: 14px;")
         header.addWidget(self.lbl_name)
         header.addStretch()
         
-        self.btn_edit = QPushButton("✏️")
-        self.btn_edit.setFixedSize(28, 28)
+        # Edit button with SVG icon
+        self.btn_edit = IconButton(
+            icon_name="edit",
+            size=18,
+            icon_only=True
+        )
         self.btn_edit.setToolTip(tr("common.edit"))
         self.btn_edit.clicked.connect(lambda: self.edit_requested.emit(self.name))
         header.addWidget(self.btn_edit)
         
-        self.btn_delete = QPushButton("🗑️")
-        self.btn_delete.setFixedSize(28, 28)
+        # Delete button with SVG icon
+        self.btn_delete = IconButton(
+            icon_name="trash",
+            size=18,
+            icon_only=True
+        )
         self.btn_delete.setToolTip(tr("common.delete"))
         self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(self.name))
         header.addWidget(self.btn_delete)
         
         layout.addLayout(header)
         
-        # Server path
+        # Server path with folder icon
         server_path = self.profile_data.get("server_path", "")
-        self.lbl_path = QLabel(f"📁 {server_path}")
+        path_layout = QHBoxLayout()
+        path_layout.setSpacing(4)
+        
+        folder_label = QLabel()
+        folder_label.setPixmap(Icons.get_pixmap("folder", size=14))
+        path_layout.addWidget(folder_label)
+        
+        self.lbl_path = QLabel(server_path)
         self.lbl_path.setStyleSheet("color: #aaa; font-size: 11px;")
         self.lbl_path.setWordWrap(True)
-        layout.addWidget(self.lbl_path)
+        path_layout.addWidget(self.lbl_path, stretch=1)
+        
+        layout.addLayout(path_layout)
         
         # Status
         self._check_status(server_path)
@@ -84,19 +91,32 @@ class ProfileCard(QFrame):
         path = Path(server_path)
         exe_exists = (path / "DayZServer_x64.exe").exists() if path.exists() else False
         
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(4)
+        
         if exe_exists:
-            status = f"✅ {tr('validation.server_valid')}"
+            status_text = tr('validation.server_valid')
+            icon_name = "success"
             color = "#4caf50"
         elif path.exists():
-            status = f"⚠️ {tr('validation.server_not_found')}"
+            status_text = tr('validation.server_not_found')
+            icon_name = "warning"
             color = "#ff9800"
         else:
-            status = f"❌ {tr('validation.invalid_path')}"
+            status_text = tr('validation.invalid_path')
+            icon_name = "error"
             color = "#f44336"
         
-        self.lbl_status = QLabel(status)
+        status_icon = QLabel()
+        status_icon.setPixmap(Icons.get_pixmap(icon_name, color=color, size=14))
+        status_layout.addWidget(status_icon)
+        
+        self.lbl_status = QLabel(status_text)
         self.lbl_status.setStyleSheet(f"color: {color}; font-size: 11px;")
-        self.layout().addWidget(self.lbl_status)
+        status_layout.addWidget(self.lbl_status)
+        status_layout.addStretch()
+        
+        self.layout().addLayout(status_layout)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -128,7 +148,11 @@ class ProfilesTab(QWidget):
         header.addWidget(self.lbl_title)
         header.addStretch()
         
-        self.btn_new = QPushButton(f"➕ {tr('profiles.new_profile')}")
+        self.btn_new = IconButton(
+            icon_name="plus",
+            text=tr('profiles.new_profile'),
+            size=16
+        )
         self.btn_new.setStyleSheet("padding: 8px 16px;")
         self.btn_new.clicked.connect(self._create_profile)
         header.addWidget(self.btn_new)
@@ -275,7 +299,7 @@ class ProfilesTab(QWidget):
     def update_texts(self):
         """Update UI texts for language change."""
         self.lbl_title.setText(f"<h2>{tr('profiles.title')}</h2>")
-        self.btn_new.setText(f"➕ {tr('profiles.new_profile')}")
+        self.btn_new.setText(tr('profiles.new_profile'))
         self.lbl_empty.setText(tr("profiles.no_profiles"))
         self._update_current_indicator()
         self._load_profiles()

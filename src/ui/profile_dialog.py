@@ -121,17 +121,17 @@ class ProfileDialog(QDialog):
         server_path = Path(self.txt_server_path.text())
         
         if not server_path.exists():
-            self.lbl_status.setText(f"⚠️ {tr('validation.invalid_path')}")
+            self.lbl_status.setText(tr('validation.invalid_path'))
             self.lbl_status.setStyleSheet("color: red;")
             return False
         
         exe_path = server_path / "DayZServer_x64.exe"
         if not exe_path.exists():
-            self.lbl_status.setText(f"⚠️ {tr('validation.server_not_found')}")
+            self.lbl_status.setText(tr('validation.server_not_found'))
             self.lbl_status.setStyleSheet("color: orange;")
             return False
         
-        self.lbl_status.setText(f"✅ {tr('validation.server_valid')}")
+        self.lbl_status.setText(tr('validation.server_valid'))
         self.lbl_status.setStyleSheet("color: green;")
         return True
     

@@ -1,133 +1,150 @@
 """
-Theme Manager - Dark/Light/System theme support
+Theme Manager - Dark/Light/System theme support with accent color customization
 """
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QObject
+
+from src.ui.icons import ACCENT_COLORS
 
 
-DARK_STYLESHEET = """
+def get_dark_stylesheet(accent: str = "#0078d4") -> str:
+    """Generate dark theme stylesheet with custom accent color."""
+    accent_hover = _lighten_color(accent, 15)
+    accent_light = _rgba_color(accent, 0.1)
+    accent_border = _rgba_color(accent, 0.3)
+    
+    return f"""
 /* Main Window */
-QMainWindow {
+QMainWindow {{
     background-color: #1e1e1e;
-}
+}}
 
 /* Central Widget */
-QWidget {
+QWidget {{
     background-color: #1e1e1e;
     color: #e0e0e0;
-}
+}}
+
+/* Prevent solid blocks under text */
+QLabel, QAbstractButton, QCheckBox, QRadioButton {{
+    background-color: transparent;
+}}
+
+QFrame {{
+    background-color: transparent;
+}}
 
 /* Sidebar Navigation */
-QListWidget#sidebar {
+QListWidget#sidebar {{
     background-color: #252526;
     border: none;
     border-right: 1px solid #3c3c3c;
     padding: 8px 0;
     font-size: 13px;
-}
+}}
 
-QListWidget#sidebar::item {
+QListWidget#sidebar::item {{
     padding: 12px 20px;
     border-radius: 0;
     margin: 2px 0;
     color: #b0b0b0;
-}
+}}
 
-QListWidget#sidebar::item:hover {
+QListWidget#sidebar::item:hover {{
     background-color: #2d2d30;
     color: #ffffff;
-}
+}}
 
-QListWidget#sidebar::item:selected {
-    background-color: #094771;
+QListWidget#sidebar::item:selected {{
+    background-color: {accent_light};
     color: #ffffff;
-    border-left: 3px solid #0078d4;
-}
+    border-left: 3px solid {accent};
+}}
 
 /* Group Boxes */
-QGroupBox {
+QGroupBox {{
     font-weight: bold;
     border: 1px solid #3c3c3c;
     border-radius: 6px;
     margin-top: 12px;
     padding-top: 10px;
     background-color: #252526;
-}
+}}
 
-QGroupBox::title {
+QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
     left: 10px;
     padding: 0 8px;
-    color: #0078d4;
-}
+    color: {accent};
+}}
 
 /* Buttons */
-QPushButton {
+QPushButton {{
     background-color: #3c3c3c;
     border: 1px solid #555555;
     border-radius: 4px;
     padding: 6px 16px;
     color: #e0e0e0;
     min-height: 24px;
-}
+}}
 
-QPushButton:hover {
+QPushButton:hover {{
     background-color: #4a4a4a;
-    border-color: #0078d4;
-}
+    border-color: {accent};
+}}
 
-QPushButton:pressed {
-    background-color: #094771;
-}
+QPushButton:pressed {{
+    background-color: {accent_light};
+}}
 
-QPushButton:disabled {
+QPushButton:disabled {{
     background-color: #2d2d2d;
     color: #666666;
-}
+}}
 
-QPushButton#primary {
-    background-color: #0078d4;
-    border-color: #0078d4;
+QPushButton#primary {{
+    background-color: {accent};
+    border-color: {accent};
     color: white;
-}
+}}
 
-QPushButton#primary:hover {
-    background-color: #1e90ff;
-}
+QPushButton#primary:hover {{
+    background-color: {accent_hover};
+}}
 
-QPushButton#danger {
+QPushButton#danger {{
     background-color: #c42b1c;
     border-color: #c42b1c;
     color: white;
-}
+}}
 
-QPushButton#danger:hover {
+QPushButton#danger:hover {{
     background-color: #e74c3c;
-}
+}}
 
 /* Tables */
-QTableWidget {
+QTableWidget {{
     background-color: #1e1e1e;
     alternate-background-color: #252526;
     gridline-color: #3c3c3c;
     border: 1px solid #3c3c3c;
     border-radius: 4px;
-    selection-background-color: #094771;
-}
+    selection-background-color: {accent_light};
+}}
 
-QTableWidget::item {
+QTableWidget::item {{
     padding: 4px 8px;
     color: #e0e0e0;
-}
+}}
 
-QTableWidget::item:selected {
-    background-color: #094771;
-}
+QTableWidget::item:selected {{
+    background-color: {accent_light};
+}}
 
-QHeaderView::section {
+QHeaderView::section {{
     background-color: #2d2d30;
     color: #e0e0e0;
     padding: 8px;
@@ -135,133 +152,126 @@ QHeaderView::section {
     border-bottom: 1px solid #3c3c3c;
     border-right: 1px solid #3c3c3c;
     font-weight: bold;
-}
+}}
 
 /* Input Fields */
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{
     background-color: #3c3c3c;
     border: 1px solid #555555;
     border-radius: 4px;
     padding: 6px 10px;
     color: #e0e0e0;
-    selection-background-color: #094771;
-}
+    selection-background-color: {accent_light};
+}}
 
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {
-    border-color: #0078d4;
-}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {{
+    border-color: {accent};
+}}
 
-QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
+QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{
     background-color: #2d2d2d;
     color: #666666;
-}
+}}
 
-QComboBox::drop-down {
+QComboBox::drop-down {{
     border: none;
     width: 20px;
-}
+}}
 
-QComboBox::down-arrow {
-    image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid #e0e0e0;
-}
-
-QComboBox QAbstractItemView {
+QComboBox QAbstractItemView {{
     background-color: #3c3c3c;
     border: 1px solid #555555;
-    selection-background-color: #094771;
-}
+    selection-background-color: {accent_light};
+}}
 
 /* Checkboxes */
-QCheckBox {
+QCheckBox {{
     spacing: 8px;
     color: #e0e0e0;
-}
+}}
 
-QCheckBox::indicator {
+QCheckBox::indicator {{
     width: 16px;
     height: 16px;
     border-radius: 3px;
     border: 1px solid #555555;
     background-color: #3c3c3c;
-}
+}}
 
-QCheckBox::indicator:checked {
-    background-color: #0078d4;
-    border-color: #0078d4;
-}
+QCheckBox::indicator:checked {{
+    background-color: {accent};
+    border-color: {accent};
+}}
 
-QCheckBox::indicator:hover {
-    border-color: #0078d4;
-}
+QCheckBox::indicator:hover {{
+    border-color: {accent};
+}}
 
 /* Scrollbars */
-QScrollBar:vertical {
+QScrollBar:vertical {{
     background-color: #1e1e1e;
     width: 12px;
     border: none;
-}
+}}
 
-QScrollBar::handle:vertical {
+QScrollBar::handle:vertical {{
     background-color: #555555;
     border-radius: 4px;
     min-height: 30px;
     margin: 2px;
-}
+}}
 
-QScrollBar::handle:vertical:hover {
+QScrollBar::handle:vertical:hover {{
     background-color: #666666;
-}
+}}
 
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
-}
+}}
 
-QScrollBar:horizontal {
+QScrollBar:horizontal {{
     background-color: #1e1e1e;
     height: 12px;
     border: none;
-}
+}}
 
-QScrollBar::handle:horizontal {
+QScrollBar::handle:horizontal {{
     background-color: #555555;
     border-radius: 4px;
     min-width: 30px;
     margin: 2px;
-}
+}}
 
-QScrollBar::handle:horizontal:hover {
+QScrollBar::handle:horizontal:hover {{
     background-color: #666666;
-}
+}}
 
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0;
-}
+}}
 
 /* Progress Bar */
-QProgressBar {
+QProgressBar {{
     background-color: #3c3c3c;
     border: none;
     border-radius: 4px;
     height: 8px;
     text-align: center;
-}
+}}
 
-QProgressBar::chunk {
-    background-color: #0078d4;
+QProgressBar::chunk {{
+    background-color: {accent};
     border-radius: 4px;
-}
+}}
 
 /* Tabs (sub-tabs) */
-QTabWidget::pane {
+QTabWidget::pane {{
     border: 1px solid #3c3c3c;
     border-radius: 4px;
     background-color: #252526;
-}
+}}
 
-QTabBar::tab {
+QTabBar::tab {{
     background-color: #2d2d30;
     border: 1px solid #3c3c3c;
     border-bottom: none;
@@ -270,479 +280,626 @@ QTabBar::tab {
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
     color: #b0b0b0;
-}
+}}
 
-QTabBar::tab:selected {
+QTabBar::tab:selected {{
     background-color: #252526;
     color: #ffffff;
-    border-bottom: 2px solid #0078d4;
-}
+    border-bottom: 2px solid {accent};
+}}
 
-QTabBar::tab:hover:!selected {
+QTabBar::tab:hover:!selected {{
     background-color: #3c3c3c;
-}
+}}
 
 /* Splitter */
-QSplitter::handle {
+QSplitter::handle {{
     background-color: #3c3c3c;
-}
+}}
 
-QSplitter::handle:horizontal {
+QSplitter::handle:horizontal {{
     width: 2px;
-}
+}}
 
-QSplitter::handle:vertical {
+QSplitter::handle:vertical {{
     height: 2px;
-}
+}}
 
 /* Status Bar */
-QStatusBar {
-    background-color: #007acc;
+QStatusBar {{
+    background-color: {accent};
     color: white;
     padding: 4px;
-}
+}}
 
 /* Menu Bar */
-QMenuBar {
+QMenuBar {{
     background-color: #2d2d30;
     color: #e0e0e0;
     border-bottom: 1px solid #3c3c3c;
-}
+}}
 
-QMenuBar::item {
+QMenuBar::item {{
     padding: 6px 12px;
-}
+}}
 
-QMenuBar::item:selected {
-    background-color: #094771;
-}
+QMenuBar::item:selected {{
+    background-color: {accent_light};
+}}
 
-QMenu {
+QMenu {{
     background-color: #2d2d30;
     border: 1px solid #3c3c3c;
     padding: 4px 0;
-}
+}}
 
-QMenu::item {
+QMenu::item {{
     padding: 6px 20px;
     color: #e0e0e0;
-}
+}}
 
-QMenu::item:selected {
-    background-color: #094771;
-}
+QMenu::item:selected {{
+    background-color: {accent_light};
+}}
 
-QMenu::separator {
+QMenu::separator {{
     height: 1px;
     background-color: #3c3c3c;
     margin: 4px 10px;
-}
+}}
 
 /* Labels */
-QLabel {
+QLabel {{
     color: #e0e0e0;
-}
+}}
 
-QLabel#title {
+QLabel#title {{
     font-size: 18px;
     font-weight: bold;
     color: #ffffff;
-}
+}}
 
-QLabel#subtitle {
+QLabel#subtitle {{
     font-size: 12px;
     color: #888888;
-}
+}}
 
 /* Message Boxes */
-QMessageBox {
+QMessageBox {{
     background-color: #2d2d30;
-}
+}}
 
 /* Tool Tips */
-QToolTip {
+QToolTip {{
     background-color: #2d2d30;
     color: #e0e0e0;
     border: 1px solid #555555;
     padding: 4px 8px;
-}
+}}
+
+/* Profile Bar */
+QFrame#profileBar {{
+    background-color: {accent_light};
+    border-bottom: 1px solid {accent_border};
+}}
+
+/* Sidebar Header */
+QFrame#sidebarHeader {{
+    background-color: {accent};
+    padding: 16px;
+}}
+
+/* Profile Card */
+ProfileCard {{
+    background-color: #3c3c3c;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 10px;
+}}
+
+ProfileCard:hover {{
+    background-color: #454545;
+    border-color: {accent};
+}}
 """
 
 
-LIGHT_STYLESHEET = """
+def get_light_stylesheet(accent: str = "#1967d2") -> str:
+    """Generate light theme stylesheet with custom accent color."""
+    accent_hover = _darken_color(accent, 10)
+    accent_light = _rgba_color(accent, 0.08)
+    accent_border = _rgba_color(accent, 0.2)
+    
+    return f"""
 /* Main Window */
-QMainWindow {
-    background-color: #f5f5f5;
-}
+QMainWindow {{
+    background-color: #fafafa;
+}}
 
-/* Central Widget */
-QWidget {
-    background-color: #f5f5f5;
-    color: #1e1e1e;
-}
+/* Central Widget - Remove background for text clarity */
+QWidget {{
+    background-color: transparent;
+    color: #1a1a1a;
+}}
+
+/* Specific container backgrounds */
+QMainWindow > QWidget {{
+    background-color: #fafafa;
+}}
 
 /* Sidebar Navigation */
-QListWidget#sidebar {
+QListWidget#sidebar {{
     background-color: #ffffff;
     border: none;
-    border-right: 1px solid #e0e0e0;
+    border-right: 1px solid #e5e5e5;
     padding: 8px 0;
     font-size: 13px;
-}
+}}
 
-QListWidget#sidebar::item {
+QListWidget#sidebar::item {{
     padding: 12px 20px;
     border-radius: 0;
     margin: 2px 0;
-    color: #555555;
-}
+    color: #333333;
+    background-color: transparent;
+}}
 
-QListWidget#sidebar::item:hover {
-    background-color: #f0f0f0;
-    color: #1e1e1e;
-}
+QListWidget#sidebar::item:hover {{
+    background-color: #f5f5f5;
+    color: #1a1a1a;
+}}
 
-QListWidget#sidebar::item:selected {
-    background-color: #e8f0fe;
-    color: #1967d2;
-    border-left: 3px solid #1967d2;
-}
+QListWidget#sidebar::item:selected {{
+    background-color: {accent_light};
+    color: {accent};
+    border-left: 3px solid {accent};
+}}
 
-/* Group Boxes */
-QGroupBox {
+/* Group Boxes - Clean background */
+QGroupBox {{
     font-weight: bold;
-    border: 1px solid #e0e0e0;
+    border: 1px solid #e5e5e5;
     border-radius: 6px;
     margin-top: 12px;
     padding-top: 10px;
     background-color: #ffffff;
-}
+}}
 
-QGroupBox::title {
+QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
     left: 10px;
     padding: 0 8px;
-    color: #1967d2;
-}
+    color: {accent};
+    background-color: #ffffff;
+}}
 
 /* Buttons */
-QPushButton {
+QPushButton {{
     background-color: #ffffff;
-    border: 1px solid #d0d0d0;
+    border: 1px solid #d5d5d5;
     border-radius: 4px;
     padding: 6px 16px;
-    color: #1e1e1e;
+    color: #1a1a1a;
     min-height: 24px;
-}
+}}
 
-QPushButton:hover {
-    background-color: #f0f0f0;
-    border-color: #1967d2;
-}
-
-QPushButton:pressed {
-    background-color: #e8f0fe;
-}
-
-QPushButton:disabled {
+QPushButton:hover {{
     background-color: #f5f5f5;
+    border-color: {accent};
+}}
+
+QPushButton:pressed {{
+    background-color: {accent_light};
+}}
+
+QPushButton:disabled {{
+    background-color: #f0f0f0;
     color: #999999;
-}
+    border-color: #e0e0e0;
+}}
 
-QPushButton#primary {
-    background-color: #1967d2;
-    border-color: #1967d2;
+QPushButton#primary {{
+    background-color: {accent};
+    border-color: {accent};
     color: white;
-}
+}}
 
-QPushButton#primary:hover {
-    background-color: #1a73e8;
-}
+QPushButton#primary:hover {{
+    background-color: {accent_hover};
+}}
 
-QPushButton#danger {
+QPushButton#danger {{
     background-color: #d93025;
     border-color: #d93025;
     color: white;
-}
+}}
 
-QPushButton#danger:hover {
+QPushButton#danger:hover {{
     background-color: #ea4335;
-}
+}}
 
-/* Tables */
-QTableWidget {
+/* Tables - Clear text contrast */
+QTableWidget {{
     background-color: #ffffff;
     alternate-background-color: #fafafa;
-    gridline-color: #e0e0e0;
-    border: 1px solid #e0e0e0;
+    gridline-color: #e5e5e5;
+    border: 1px solid #e5e5e5;
     border-radius: 4px;
-    selection-background-color: #e8f0fe;
-}
+    selection-background-color: {accent_light};
+}}
 
-QTableWidget::item {
+QTableWidget::item {{
     padding: 4px 8px;
-    color: #1e1e1e;
-}
+    color: #1a1a1a;
+    background-color: transparent;
+}}
 
-QTableWidget::item:selected {
-    background-color: #e8f0fe;
-    color: #1967d2;
-}
+QTableWidget::item:selected {{
+    background-color: {accent_light};
+    color: {accent};
+}}
 
-QHeaderView::section {
-    background-color: #fafafa;
-    color: #1e1e1e;
+QHeaderView::section {{
+    background-color: #f5f5f5;
+    color: #1a1a1a;
     padding: 8px;
     border: none;
-    border-bottom: 1px solid #e0e0e0;
-    border-right: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e5e5e5;
+    border-right: 1px solid #e5e5e5;
     font-weight: bold;
-}
+}}
 
-/* Input Fields */
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {
+/* Input Fields - Proper contrast */
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{
     background-color: #ffffff;
-    border: 1px solid #d0d0d0;
+    border: 1px solid #d5d5d5;
     border-radius: 4px;
     padding: 6px 10px;
-    color: #1e1e1e;
-    selection-background-color: #e8f0fe;
-}
+    color: #1a1a1a;
+    selection-background-color: {accent_light};
+}}
 
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {
-    border-color: #1967d2;
-}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {{
+    border-color: {accent};
+}}
 
-QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
+QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{
     background-color: #f5f5f5;
-    color: #999999;
-}
+    color: #888888;
+    border-color: #e0e0e0;
+}}
 
-QComboBox::drop-down {
+QComboBox::drop-down {{
     border: none;
     width: 20px;
-}
+}}
 
-QComboBox::down-arrow {
-    image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid #666666;
-}
-
-QComboBox QAbstractItemView {
+QComboBox QAbstractItemView {{
     background-color: #ffffff;
-    border: 1px solid #d0d0d0;
-    selection-background-color: #e8f0fe;
-}
+    border: 1px solid #d5d5d5;
+    selection-background-color: {accent_light};
+    color: #1a1a1a;
+}}
 
-/* Checkboxes */
-QCheckBox {
+/* Checkboxes - Clear text */
+QCheckBox {{
     spacing: 8px;
-    color: #1e1e1e;
-}
+    color: #1a1a1a;
+    background-color: transparent;
+}}
 
-QCheckBox::indicator {
+QCheckBox::indicator {{
     width: 16px;
     height: 16px;
     border-radius: 3px;
-    border: 1px solid #d0d0d0;
+    border: 1px solid #d5d5d5;
     background-color: #ffffff;
-}
+}}
 
-QCheckBox::indicator:checked {
-    background-color: #1967d2;
-    border-color: #1967d2;
-}
+QCheckBox::indicator:checked {{
+    background-color: {accent};
+    border-color: {accent};
+}}
 
-QCheckBox::indicator:hover {
-    border-color: #1967d2;
-}
+QCheckBox::indicator:hover {{
+    border-color: {accent};
+}}
 
 /* Scrollbars */
-QScrollBar:vertical {
+QScrollBar:vertical {{
     background-color: #f5f5f5;
     width: 12px;
     border: none;
-}
+}}
 
-QScrollBar::handle:vertical {
+QScrollBar::handle:vertical {{
     background-color: #c0c0c0;
     border-radius: 4px;
     min-height: 30px;
     margin: 2px;
-}
+}}
 
-QScrollBar::handle:vertical:hover {
+QScrollBar::handle:vertical:hover {{
     background-color: #a0a0a0;
-}
+}}
 
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
-}
+}}
 
-QScrollBar:horizontal {
+QScrollBar:horizontal {{
     background-color: #f5f5f5;
     height: 12px;
     border: none;
-}
+}}
 
-QScrollBar::handle:horizontal {
+QScrollBar::handle:horizontal {{
     background-color: #c0c0c0;
     border-radius: 4px;
     min-width: 30px;
     margin: 2px;
-}
+}}
 
-QScrollBar::handle:horizontal:hover {
+QScrollBar::handle:horizontal:hover {{
     background-color: #a0a0a0;
-}
+}}
 
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0;
-}
+}}
 
 /* Progress Bar */
-QProgressBar {
+QProgressBar {{
     background-color: #e0e0e0;
     border: none;
     border-radius: 4px;
     height: 8px;
     text-align: center;
-}
+}}
 
-QProgressBar::chunk {
-    background-color: #1967d2;
+QProgressBar::chunk {{
+    background-color: {accent};
     border-radius: 4px;
-}
+}}
 
-/* Tabs (sub-tabs) */
-QTabWidget::pane {
-    border: 1px solid #e0e0e0;
+/* Tabs (sub-tabs) - Clean backgrounds */
+QTabWidget::pane {{
+    border: 1px solid #e5e5e5;
     border-radius: 4px;
     background-color: #ffffff;
-}
+}}
 
-QTabBar::tab {
-    background-color: #fafafa;
-    border: 1px solid #e0e0e0;
+QTabWidget::tab-bar {{
+    alignment: left;
+}}
+
+QTabBar::tab {{
+    background-color: #f5f5f5;
+    border: 1px solid #e5e5e5;
     border-bottom: none;
     padding: 8px 16px;
     margin-right: 2px;
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
-    color: #555555;
-}
+    color: #333333;
+}}
 
-QTabBar::tab:selected {
+QTabBar::tab:selected {{
     background-color: #ffffff;
-    color: #1967d2;
-    border-bottom: 2px solid #1967d2;
-}
+    color: {accent};
+    border-bottom: 2px solid {accent};
+}}
 
-QTabBar::tab:hover:!selected {
-    background-color: #f0f0f0;
-}
+QTabBar::tab:hover:!selected {{
+    background-color: #eeeeee;
+    color: #1a1a1a;
+}}
 
 /* Splitter */
-QSplitter::handle {
+QSplitter::handle {{
     background-color: #e0e0e0;
-}
+}}
 
-QSplitter::handle:horizontal {
+QSplitter::handle:horizontal {{
     width: 2px;
-}
+}}
 
-QSplitter::handle:vertical {
+QSplitter::handle:vertical {{
     height: 2px;
-}
+}}
 
 /* Status Bar */
-QStatusBar {
-    background-color: #1967d2;
+QStatusBar {{
+    background-color: {accent};
     color: white;
     padding: 4px;
-}
+}}
 
 /* Menu Bar */
-QMenuBar {
+QMenuBar {{
     background-color: #ffffff;
     color: #1e1e1e;
     border-bottom: 1px solid #e0e0e0;
-}
+}}
 
-QMenuBar::item {
+QMenuBar::item {{
     padding: 6px 12px;
-}
+}}
 
-QMenuBar::item:selected {
-    background-color: #e8f0fe;
-}
+QMenuBar::item:selected {{
+    background-color: {accent_light};
+}}
 
-QMenu {
+QMenu {{
     background-color: #ffffff;
     border: 1px solid #e0e0e0;
     padding: 4px 0;
-}
+}}
 
-QMenu::item {
+QMenu::item {{
     padding: 6px 20px;
     color: #1e1e1e;
-}
+}}
 
-QMenu::item:selected {
-    background-color: #e8f0fe;
-}
+QMenu::item:selected {{
+    background-color: {accent_light};
+}}
 
-QMenu::separator {
+QMenu::separator {{
     height: 1px;
     background-color: #e0e0e0;
     margin: 4px 10px;
-}
+}}
 
-/* Labels */
-QLabel {
-    color: #1e1e1e;
-}
+/* Labels - Clear text with transparent background */
+QLabel {{
+    color: #1a1a1a;
+    background-color: transparent;
+}}
 
-QLabel#title {
+QLabel#title {{
     font-size: 18px;
     font-weight: bold;
-    color: #1e1e1e;
-}
+    color: #1a1a1a;
+}}
 
-QLabel#subtitle {
+QLabel#subtitle {{
     font-size: 12px;
-    color: #666666;
-}
+    color: #555555;
+}}
+
+/* Form Labels */
+QFormLayout QLabel {{
+    color: #1a1a1a;
+    background-color: transparent;
+}}
 
 /* Message Boxes */
-QMessageBox {
+QMessageBox {{
     background-color: #ffffff;
-}
+}}
 
 /* Tool Tips */
-QToolTip {
+QToolTip {{
     background-color: #ffffff;
     color: #1e1e1e;
     border: 1px solid #d0d0d0;
     padding: 4px 8px;
-}
+}}
+
+/* Profile Bar */
+QFrame#profileBar {{
+    background-color: {accent_light};
+    border-bottom: 1px solid {accent_border};
+}}
+
+/* Sidebar Header */
+QFrame#sidebarHeader {{
+    background-color: {accent};
+    padding: 16px;
+}}
+
+/* Profile Card - Clear styling */
+ProfileCard {{
+    background-color: #ffffff;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    padding: 10px;
+}}
+
+ProfileCard:hover {{
+    background-color: #fafafa;
+    border-color: {accent};
+}}
+
+/* Scroll Areas - Transparent content */
+QScrollArea {{
+    background-color: transparent;
+    border: none;
+}}
+
+QScrollArea > QWidget > QWidget {{
+    background-color: transparent;
+}}
+
+/* List Widgets - Clear styling */
+QListWidget {{
+    background-color: #ffffff;
+    border: 1px solid #e5e5e5;
+    border-radius: 4px;
+    color: #1a1a1a;
+}}
+
+QListWidget::item {{
+    padding: 8px;
+    color: #1a1a1a;
+    background-color: transparent;
+}}
+
+QListWidget::item:selected {{
+    background-color: {accent_light};
+    color: {accent};
+}}
+
+QListWidget::item:hover:!selected {{
+    background-color: #f5f5f5;
+}}
+
+/* Specific frame backgrounds */
+QFrame {{
+    background-color: transparent;
+}}
+
+QFrame#profileBar {{
+    background-color: {accent_light};
+    border-bottom: 1px solid {accent_border};
+}}
+
+QFrame#sidebarHeader {{
+    background-color: {accent};
+    padding: 16px;
+}}
 """
 
 
+def _lighten_color(hex_color: str, percent: int) -> str:
+    """Lighten a hex color by a percentage."""
+    color = QColor(hex_color)
+    h, s, l, a = color.getHslF()
+    l = min(1.0, l + (percent / 100))
+    color.setHslF(h, s, l, a)
+    return color.name()
+
+
+def _darken_color(hex_color: str, percent: int) -> str:
+    """Darken a hex color by a percentage."""
+    color = QColor(hex_color)
+    h, s, l, a = color.getHslF()
+    l = max(0.0, l - (percent / 100))
+    color.setHslF(h, s, l, a)
+    return color.name()
+
+
+def _rgba_color(hex_color: str, alpha: float) -> str:
+    """Convert hex color to rgba with alpha."""
+    color = QColor(hex_color)
+    return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha})"
+
+
 class ThemeManager:
-    """Manages application themes (Dark/Light/System)."""
+    """Manages application themes (Dark/Light/System) with accent colors."""
     
     DARK = "dark"
     LIGHT = "light"
     SYSTEM = "system"
     
-    _current_theme = SYSTEM
+    _current_theme = DARK
+    _current_accent = "#0078d4"
+    _observers = []
     
     @classmethod
-    def apply_theme(cls, theme: str, app: QApplication = None):
+    def apply_theme(cls, theme: str = None, accent: str = None, app: QApplication = None):
         """Apply a theme to the application."""
         if app is None:
             app = QApplication.instance()
@@ -750,9 +907,14 @@ class ThemeManager:
         if not app:
             return
         
-        cls._current_theme = theme
+        if theme:
+            cls._current_theme = theme
+        if accent:
+            cls._current_accent = accent
         
-        if theme == cls.SYSTEM:
+        effective_theme = cls._current_theme
+        
+        if effective_theme == cls.SYSTEM:
             # Detect system theme (Windows)
             try:
                 import winreg
@@ -762,14 +924,28 @@ class ThemeManager:
                 )
                 value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
                 winreg.CloseKey(key)
-                theme = cls.LIGHT if value else cls.DARK
+                effective_theme = cls.LIGHT if value else cls.DARK
             except Exception:
-                theme = cls.DARK  # Default to dark if detection fails
+                effective_theme = cls.DARK
         
-        if theme == cls.DARK:
-            app.setStyleSheet(DARK_STYLESHEET)
+        if effective_theme == cls.DARK:
+            app.setStyleSheet(get_dark_stylesheet(cls._current_accent))
         else:
-            app.setStyleSheet(LIGHT_STYLESHEET)
+            app.setStyleSheet(get_light_stylesheet(cls._current_accent))
+        
+        # Clear icon cache when theme changes
+        try:
+            from src.ui.icons import Icons
+            Icons.clear_cache()
+        except:
+            pass
+        
+        # Notify observers
+        for observer in cls._observers:
+            try:
+                observer(cls._current_theme, cls._current_accent)
+            except:
+                pass
     
     @classmethod
     def get_current_theme(cls) -> str:
@@ -777,9 +953,48 @@ class ThemeManager:
         return cls._current_theme
     
     @classmethod
+    def get_current_accent(cls) -> str:
+        """Get the current accent color."""
+        return cls._current_accent
+    
+    @classmethod
+    def set_accent_color(cls, accent: str, app: QApplication = None):
+        """Set and apply a new accent color."""
+        cls._current_accent = accent
+        cls.apply_theme(app=app)
+    
+    @classmethod
     def toggle_theme(cls, app: QApplication = None):
         """Toggle between dark and light themes."""
         if cls._current_theme == cls.DARK:
-            cls.apply_theme(cls.LIGHT, app)
+            cls.apply_theme(cls.LIGHT, app=app)
         else:
-            cls.apply_theme(cls.DARK, app)
+            cls.apply_theme(cls.DARK, app=app)
+    
+    @classmethod
+    def is_dark_theme(cls) -> bool:
+        """Check if current theme is dark."""
+        if cls._current_theme == cls.SYSTEM:
+            try:
+                import winreg
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+                )
+                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                winreg.CloseKey(key)
+                return not value
+            except:
+                return True
+        return cls._current_theme == cls.DARK
+    
+    @classmethod
+    def add_observer(cls, callback):
+        """Add an observer to be notified when theme changes."""
+        cls._observers.append(callback)
+    
+    @classmethod
+    def remove_observer(cls, callback):
+        """Remove a theme change observer."""
+        if callback in cls._observers:
+            cls._observers.remove(callback)
