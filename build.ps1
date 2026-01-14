@@ -36,6 +36,17 @@ Write-Host ("[INFO] Using Python: {0}" -f $py)
 # Verify PySide6 exists; otherwise EXE will crash.
 & $py -c "import PySide6" | Out-Null
 
+# Ensure we can generate a multi-size Windows .ico
+try {
+  & $py -c "import PIL" | Out-Null
+} catch {
+  Write-Host '[INFO] Installing Pillow (for ICO generation)...'
+  & $py -m pip install Pillow | Out-Null
+}
+
+Write-Host '[INFO] Generating app_icon.ico from logo...'
+& $py (Join-Path $Root 'tools\generate_icons.py') --input (Join-Path $Root 'assets\icons\new_logo.png') --output (Join-Path $Root 'assets\icons\app_icon.ico')
+
 if ($Clean) {
   Write-Host '[INFO] Cleaning build artifacts...'
   if (Test-Path 'build') { Remove-Item -Recurse -Force 'build' }
