@@ -61,6 +61,8 @@ class Icons:
         "undo": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>''',
         "arrow_up": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>''',
         "arrow_down": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>''',
+        "chevron_left": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>''',
+        "chevron_right": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>''',
         "download": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>''',
         "upload": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>''',
         "copy": '''<svg viewBox="0 0 24 24"><path fill="{color}" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>''',

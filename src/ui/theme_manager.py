@@ -41,24 +41,38 @@ QListWidget#sidebar {{
     background-color: #252526;
     border: none;
     border-right: 1px solid #3c3c3c;
-    padding: 8px 0;
+    padding: 10px 0;
     font-size: 13px;
 }}
 
+QPushButton#sidebarCollapseBtn {{
+    background-color: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 10px;
+    padding: 8px;
+}}
+
+QPushButton#sidebarCollapseBtn:hover {{
+    background-color: rgba(255, 255, 255, 0.20);
+    border-color: rgba(255, 255, 255, 0.34);
+}}
+
 QListWidget#sidebar::item {{
-    padding: 12px 20px;
-    border-radius: 0;
-    margin: 2px 0;
+    padding: 12px 16px;
+    margin: 4px 10px;
+    border-radius: 10px;
     color: #b0b0b0;
 }}
 
 QListWidget#sidebar::item:hover {{
-    background-color: #2d2d30;
+    background-color: rgba(255, 255, 255, 0.06);
     color: #ffffff;
 }}
 
 QListWidget#sidebar::item:selected {{
-    background-color: {accent_light};
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                stop: 0 {accent_light},
+                                stop: 1 rgba(255, 255, 255, 0.04));
     color: #ffffff;
     border-left: 3px solid {accent};
 }}
@@ -385,8 +399,20 @@ QFrame#profileBar {{
 
 /* Sidebar Header */
 QFrame#sidebarHeader {{
-    background-color: {accent};
-    padding: 16px;
+    background-color: transparent;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+}}
+
+QFrame#sidebarLogoBadge {{
+    background: qradialgradient(cx: 0.3, cy: 0.2, radius: 1.2,
+                                stop: 0 rgba(255, 255, 255, 0.18),
+                                stop: 1 rgba(255, 255, 255, 0.08));
+    border: 1px solid rgba(255, 255, 255, 0.26);
+    border-radius: 18px;
+}}
+
+QLabel#sidebarLogo {{
+    background-color: transparent;
 }}
 
 /* Profile Card */
@@ -432,26 +458,40 @@ QListWidget#sidebar {{
     background-color: #ffffff;
     border: none;
     border-right: 1px solid #e5e5e5;
-    padding: 8px 0;
+    padding: 10px 0;
     font-size: 13px;
 }}
 
+QPushButton#sidebarCollapseBtn {{
+    background-color: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 10px;
+    padding: 8px;
+}}
+
+QPushButton#sidebarCollapseBtn:hover {{
+    background-color: rgba(255, 255, 255, 0.78);
+    border-color: rgba(0, 0, 0, 0.16);
+}}
+
 QListWidget#sidebar::item {{
-    padding: 12px 20px;
-    border-radius: 0;
-    margin: 2px 0;
+    padding: 12px 16px;
+    margin: 4px 10px;
+    border-radius: 10px;
     color: #333333;
     background-color: transparent;
 }}
 
 QListWidget#sidebar::item:hover {{
-    background-color: #f5f5f5;
+    background-color: rgba(0, 0, 0, 0.04);
     color: #1a1a1a;
 }}
 
 QListWidget#sidebar::item:selected {{
-    background-color: {accent_light};
-    color: {accent};
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                stop: 0 {accent_light},
+                                stop: 1 rgba(0, 0, 0, 0.02));
+    color: #1a1a1a;
     border-left: 3px solid {accent};
 }}
 
@@ -796,8 +836,20 @@ QFrame#profileBar {{
 
 /* Sidebar Header */
 QFrame#sidebarHeader {{
-    background-color: {accent};
-    padding: 16px;
+    background-color: transparent;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+}}
+
+QFrame#sidebarLogoBadge {{
+    background: qradialgradient(cx: 0.3, cy: 0.2, radius: 1.2,
+                                stop: 0 rgba(255, 255, 255, 0.85),
+                                stop: 1 rgba(255, 255, 255, 0.55));
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 18px;
+}}
+
+QLabel#sidebarLogo {{
+    background-color: transparent;
 }}
 
 /* Profile Card - Clear styling */
