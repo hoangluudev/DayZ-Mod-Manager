@@ -6,37 +6,36 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QFormLayout, QComboBox, QCheckBox, QFileDialog,
-    QMessageBox, QFrame, QTabWidget, QScrollArea
+    QMessageBox, QFrame, QTabWidget, QScrollArea, QGridLayout
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QDesktopServices
 
 from src.utils.locale_manager import LocaleManager, tr
 from src.core.settings_manager import SettingsManager
 from src.core.app_config import AppConfigManager
 from src.core.default_restore import restore_server_defaults
-from src.ui.widgets import SectionBox, PathSelector, AccentColorSelector, IconButton
-from src.ui.icons import Icons, ACCENT_COLORS
+from src.ui.widgets import SectionBox, PathSelector, IconButton
+from src.ui.icons import Icons
 from src.ui.theme_manager import ThemeManager
+from src.ui.base import BaseTab, BaseSubTab
+from src.ui.factories import create_action_button
 
 
-class AppearanceTab(QWidget):
-    """Appearance settings sub-tab (Theme, Language, Colors)."""
+class AppearanceTab(BaseSubTab):
+    """Appearance settings sub-tab (Theme, Language)."""
     
     language_changed = Signal()
     theme_changed = Signal(str)
-    accent_changed = Signal(str)
     
     def __init__(self, settings: SettingsManager, locale: LocaleManager, parent=None):
         super().__init__(parent)
         self.settings = settings
         self.locale = locale
-        self._setup_ui()
+        self._setup_content()
         self._load_settings()
     
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+    def _setup_content(self):
         
         # Language Section
         lang_box = SectionBox(tr("settings.language"))
@@ -54,42 +53,180 @@ class AppearanceTab(QWidget):
         lang_form.addRow("", self.lbl_lang_desc)
         
         lang_box.add_layout(lang_form)
-        layout.addWidget(lang_box)
+        self.add_widget(lang_box)
         
-        # Theme Section
+        # Theme Section - CurseForge-style theme cards
         theme_box = SectionBox(tr("settings.theme"))
-        theme_form = QFormLayout()
-        theme_form.setSpacing(12)
+        theme_layout = QVBoxLayout()
+        theme_layout.setSpacing(10)
+
+        self.lbl_theme_desc = QLabel(tr("settings.theme_desc"))
+        self.lbl_theme_desc.setStyleSheet("color: gray; font-size: 11px;")
+        theme_layout.addWidget(self.lbl_theme_desc)
+
+        # Scrollable grid of theme cards
+        self.theme_scroll = QScrollArea()
+        self.theme_scroll.setWidgetResizable(True)
+        self.theme_scroll.setFrameShape(QFrame.NoFrame)
+
+        self.theme_grid_host = QWidget()
+        self.theme_grid = QGridLayout(self.theme_grid_host)
+        self.theme_grid.setContentsMargins(0, 0, 0, 0)
+        self.theme_grid.setHorizontalSpacing(12)
+        self.theme_grid.setVerticalSpacing(12)
+        self.theme_scroll.setWidget(self.theme_grid_host)
+        theme_layout.addWidget(self.theme_scroll)
+
+        theme_box.add_layout(theme_layout)
+        self.add_widget(theme_box)
         
-        self.cmb_theme = QComboBox()
-        self.cmb_theme.addItem(tr("settings.theme_dark"), "dark")
-        self.cmb_theme.addItem(tr("settings.theme_light"), "light")
-        self.cmb_theme.addItem(tr("settings.theme_system"), "system")
-        self.cmb_theme.currentIndexChanged.connect(self._on_theme_changed)
-        theme_form.addRow(tr("settings.theme") + ":", self.cmb_theme)
-        
-        theme_box.add_layout(theme_form)
-        layout.addWidget(theme_box)
-        
-        # Accent Color Section
-        color_box = SectionBox(tr("settings.accent_color"))
-        color_layout = QVBoxLayout()
-        color_layout.setSpacing(12)
-        
-        self.lbl_color_desc = QLabel(tr("settings.accent_color_desc"))
-        self.lbl_color_desc.setStyleSheet("color: gray; font-size: 11px;")
-        color_layout.addWidget(self.lbl_color_desc)
-        
-        self.color_selector = AccentColorSelector(
-            self.settings.settings.accent_color or "#0078d4"
-        )
-        self.color_selector.color_changed.connect(self._on_accent_changed)
-        color_layout.addWidget(self.color_selector)
-        
-        color_box.add_layout(color_layout)
-        layout.addWidget(color_box)
-        
-        layout.addStretch()
+        self.add_stretch()
+
+    def _rebuild_theme_cards(self):
+        # Clear existing cards
+        while self.theme_grid.count():
+            item = self.theme_grid.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        from src.ui.themes import ThemeRegistry
+
+        self._theme_cards = {}
+        themes = ThemeRegistry.get_theme_list()  # [(id, name), ...]
+        current_theme_id = self.settings.settings.theme
+
+        # 2-column layout like CurseForge
+        cols = 2
+        row = 0
+        col = 0
+        for theme_id, _ in themes:
+            pack = ThemeRegistry.get(theme_id)
+            if pack is None:
+                continue
+
+            display_name = pack.name
+            if theme_id == "default":
+                # Localized display name for the default theme.
+                display_name = tr("theme.default")
+
+            card = QFrame()
+            card.setObjectName("themeCard")
+            card.setProperty("selected", theme_id == current_theme_id)
+            card.setCursor(Qt.PointingHandCursor)
+
+            outer = QVBoxLayout(card)
+            outer.setContentsMargins(12, 12, 12, 12)
+            outer.setSpacing(10)
+
+            # Preview area (CurseForge-like): accent block + skeleton bars
+            preview = QFrame()
+            preview.setObjectName("themeCardPreview")
+            preview.setFixedHeight(52)
+            preview_l = QHBoxLayout(preview)
+            preview_l.setContentsMargins(10, 10, 10, 10)
+            preview_l.setSpacing(10)
+
+            preview_accent = QFrame()
+            preview_accent.setObjectName("themeCardAccent")
+            preview_accent.setFixedSize(32, 32)
+            preview_accent.setStyleSheet(
+                f"background-color: {pack.colors.accent}; border-radius: 10px;"
+            )
+            preview_l.addWidget(preview_accent)
+
+            bars_col = QVBoxLayout()
+            bars_col.setContentsMargins(0, 0, 0, 0)
+            bars_col.setSpacing(6)
+
+            bar1 = QFrame()
+            bar1.setObjectName("themeCardSkeleton")
+            bar1.setFixedHeight(10)
+            bar1.setStyleSheet(
+                f"background-color: {pack.colors.surface}; border-radius: 6px;"
+            )
+            bar2 = QFrame()
+            bar2.setObjectName("themeCardSkeleton")
+            bar2.setFixedHeight(10)
+            bar2.setStyleSheet(
+                f"background-color: {pack.colors.background_tertiary}; border-radius: 6px;"
+            )
+
+            bars_col.addWidget(bar1)
+            bars_col.addWidget(bar2)
+            preview_l.addLayout(bars_col, stretch=1)
+            outer.addWidget(preview)
+
+            # Bottom row: name + optional desc + selected check icon
+            bottom = QHBoxLayout()
+            bottom.setContentsMargins(0, 0, 0, 0)
+            bottom.setSpacing(10)
+
+            text_col = QVBoxLayout()
+            text_col.setContentsMargins(0, 0, 0, 0)
+            text_col.setSpacing(2)
+
+            name = QLabel(display_name)
+            name.setObjectName("themeCardName")
+            text_col.addWidget(name)
+
+            if pack.description:
+                desc = QLabel(pack.description or "")
+                desc.setObjectName("themeCardDesc")
+                desc.setWordWrap(True)
+                text_col.addWidget(desc)
+
+            bottom.addLayout(text_col, stretch=1)
+
+            check = QLabel()
+            check.setObjectName("themeCheck")
+            check.setFixedSize(22, 22)
+            check.setAlignment(Qt.AlignCenter)
+            if theme_id == current_theme_id:
+                check.setPixmap(Icons.get_icon("check", color=pack.colors.accent, size=18).pixmap(18, 18))
+            bottom.addWidget(check, alignment=Qt.AlignRight | Qt.AlignVCenter)
+            outer.addLayout(bottom)
+
+            def _on_click(_evt=None, tid=theme_id):
+                self._select_theme_card(tid)
+
+            card.mousePressEvent = _on_click  # type: ignore[attr-defined]
+
+            self._theme_cards[theme_id] = (card, check)
+
+            self.theme_grid.addWidget(card, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+        # Fill remaining space
+        self.theme_grid.setColumnStretch(0, 1)
+        self.theme_grid.setColumnStretch(1, 1)
+
+    def _select_theme_card(self, theme_id: str):
+        if not theme_id:
+            return
+
+        # Persist
+        self.settings.settings.theme = theme_id
+        self.settings.save()
+
+        # Apply
+        ThemeManager.apply_theme(theme_id)
+        self.theme_changed.emit(theme_id)
+
+        # Update UI selection
+        for tid, (card, check) in getattr(self, "_theme_cards", {}).items():
+            selected = tid == theme_id
+            card.setProperty("selected", selected)
+            if selected:
+                from src.ui.themes import ThemeRegistry
+                pack = ThemeRegistry.get(tid) or ThemeRegistry.get_default()
+                check.setPixmap(Icons.get_icon("check", color=pack.colors.accent, size=18).pixmap(18, 18))
+            else:
+                check.clear()
+            card.style().unpolish(card)
+            card.style().polish(card)
     
     def _load_settings(self):
         """Load current settings into UI."""
@@ -99,15 +236,8 @@ class AppearanceTab(QWidget):
         if index >= 0:
             self.cmb_language.setCurrentIndex(index)
         
-        # Theme
-        current_theme = self.settings.settings.theme
-        index = self.cmb_theme.findData(current_theme)
-        if index >= 0:
-            self.cmb_theme.setCurrentIndex(index)
-        
-        # Accent color
-        accent = self.settings.settings.accent_color or "#0078d4"
-        self.color_selector.set_color(accent)
+        # Theme cards
+        self._rebuild_theme_cards()
     
     def _on_language_changed(self, index):
         """Handle language change."""
@@ -118,45 +248,64 @@ class AppearanceTab(QWidget):
             self.settings.save()
             self.language_changed.emit()
     
-    def _on_theme_changed(self, index):
-        """Handle theme change."""
-        theme = self.cmb_theme.itemData(index)
-        if theme:
-            self.settings.settings.theme = theme
-            self.settings.save()
-            ThemeManager.apply_theme(theme, self.settings.settings.accent_color)
-            self.theme_changed.emit(theme)
-    
-    def _on_accent_changed(self, color):
-        """Handle accent color change."""
-        self.settings.settings.accent_color = color
-        self.settings.save()
-        ThemeManager.apply_theme(self.settings.settings.theme, color)
-        self.accent_changed.emit(color)
-    
     def update_texts(self):
         """Update UI texts."""
-        # Update theme combo items
-        self.cmb_theme.setItemText(0, tr("settings.theme_dark"))
-        self.cmb_theme.setItemText(1, tr("settings.theme_light"))
-        self.cmb_theme.setItemText(2, tr("settings.theme_system"))
         self.lbl_lang_desc.setText(tr("settings.language_desc"))
-        self.lbl_color_desc.setText(tr("settings.accent_color_desc"))
+        self.lbl_theme_desc.setText(tr("settings.theme_desc"))
+        # Rebuild cards so any translated strings (if added later) refresh.
+        try:
+            self._rebuild_theme_cards()
+        except Exception:
+            pass
 
 
-class ConfigTab(QWidget):
+class ConfigTab(BaseSubTab):
     """Configuration settings sub-tab (Paths, Storage)."""
     
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self._setup_ui()
+        self._setup_content()
         self._load_settings()
     
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+    def _setup_content(self):
+
+        # Config Files Section (shows independent generated configs)
+        try:
+            from src.core.storage_paths import (
+                get_configs_path,
+                get_settings_file_path,
+                get_app_config_file_path,
+            )
+        except Exception:
+            get_configs_path = None  # type: ignore
+            get_settings_file_path = None  # type: ignore
+            get_app_config_file_path = None  # type: ignore
+
+        if get_settings_file_path and get_app_config_file_path:
+            files_box = SectionBox(tr("settings.config_files"))
+            files_layout = QVBoxLayout()
+            files_layout.setSpacing(10)
+
+            files_form = QFormLayout()
+            files_form.setSpacing(8)
+
+            self.lbl_settings_file = QLabel(str(get_settings_file_path()))
+            self.lbl_settings_file.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            files_form.addRow(tr("settings.settings_file") + ":", self.lbl_settings_file)
+
+            self.lbl_app_file = QLabel(str(get_app_config_file_path()))
+            self.lbl_app_file.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            files_form.addRow(tr("settings.app_config_file") + ":", self.lbl_app_file)
+
+            files_layout.addLayout(files_form)
+
+            btn_open = IconButton(icon_name="folder", text=tr("settings.open_config_folder"), size=16)
+            btn_open.clicked.connect(lambda: self._open_configs_folder(get_configs_path() if get_configs_path else None))
+            files_layout.addWidget(btn_open, alignment=Qt.AlignLeft)
+
+            files_box.add_layout(files_layout)
+            self.add_widget(files_box)
         
         # Default Paths Section
         paths_box = SectionBox(tr("settings.default_paths"))
@@ -178,7 +327,7 @@ class ConfigTab(QWidget):
         paths_form.addRow(tr("settings.default_server") + ":", self.path_server)
         
         paths_box.add_layout(paths_form)
-        layout.addWidget(paths_box)
+        self.add_widget(paths_box)
         
         # Data Storage Section
         storage_box = SectionBox(tr("settings.data_storage"))
@@ -214,7 +363,7 @@ class ConfigTab(QWidget):
         storage_layout.addWidget(self.lbl_storage_note)
         
         storage_box.add_layout(storage_layout)
-        layout.addWidget(storage_box)
+        self.add_widget(storage_box)
         
         # Restore Defaults Section
         restore_box = SectionBox(tr("settings.restore_section"))
@@ -237,9 +386,17 @@ class ConfigTab(QWidget):
         restore_layout.addLayout(btn_layout)
         
         restore_box.add_layout(restore_layout)
-        layout.addWidget(restore_box)
+        self.add_widget(restore_box)
         
-        layout.addStretch()
+        self.add_stretch()
+
+    def _open_configs_folder(self, path: Path | None):
+        try:
+            if path is None:
+                return
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        except Exception:
+            pass
     
     def _load_settings(self):
         """Load current settings into UI."""
@@ -314,19 +471,16 @@ class ConfigTab(QWidget):
         self.chk_custom_storage.setText(tr("settings.use_custom_storage"))
 
 
-class BehaviorTab(QWidget):
+class BehaviorTab(BaseSubTab):
     """Behavior settings sub-tab."""
     
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self._setup_ui()
+        self._setup_content()
         self._load_settings()
     
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+    def _setup_content(self):
         
         # Behavior Section
         behavior_box = SectionBox(tr("settings.behavior"))
@@ -346,9 +500,9 @@ class BehaviorTab(QWidget):
         behavior_layout.addWidget(self.chk_copy_bikeys)
         
         behavior_box.add_layout(behavior_layout)
-        layout.addWidget(behavior_box)
+        self.add_widget(behavior_box)
         
-        layout.addStretch()
+        self.add_stretch()
     
     def _load_settings(self):
         """Load current settings into UI."""
@@ -370,18 +524,15 @@ class BehaviorTab(QWidget):
         self.chk_copy_bikeys.setText(tr("settings.auto_copy_bikeys"))
 
 
-class AboutTab(QWidget):
+class AboutTab(BaseSubTab):
     """About sub-tab."""
     
     def __init__(self, app_config: AppConfigManager, parent=None):
         super().__init__(parent)
         self.app_config = app_config
-        self._setup_ui()
+        self._setup_content()
     
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+    def _setup_content(self):
         
         # About Section
         about_box = SectionBox(tr("settings.about"))
@@ -412,9 +563,9 @@ class AboutTab(QWidget):
         about_layout.addWidget(desc_label)
         
         about_box.add_layout(about_layout)
-        layout.addWidget(about_box)
+        self.add_widget(about_box)
         
-        layout.addStretch()
+        self.add_stretch()
     
     def update_texts(self):
         """Update UI texts."""
@@ -425,29 +576,21 @@ class AboutTab(QWidget):
             pass
 
 
-class SettingsTab(QWidget):
+class SettingsTab(BaseTab):
     """Tab for application settings with sub-tabs."""
     
     language_changed = Signal()
     theme_changed = Signal(str)
     
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, scrollable=False, title_key="settings.title")
         self.settings = SettingsManager()
         self.locale = LocaleManager()
         self.app_config = AppConfigManager()
         
-        self._setup_ui()
+        self._setup_content()
     
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
-        
-        # Header
-        self.lbl_title = QLabel(f"<h2>{tr('settings.title')}</h2>")
-        layout.addWidget(self.lbl_title)
-        
+    def _setup_content(self):
         # Tab widget for sub-tabs
         self.tab_widget = QTabWidget()
         
@@ -460,17 +603,17 @@ class SettingsTab(QWidget):
         self.tab_behavior = BehaviorTab(self.settings)
         self.tab_about = AboutTab(self.app_config)
         
-        # Add sub-tabs with icons
+        # Add sub-tabs
         self.tab_widget.addTab(self.tab_appearance, tr("settings.appearance"))
         self.tab_widget.addTab(self.tab_config, tr("settings.paths"))
         self.tab_widget.addTab(self.tab_behavior, tr("settings.behavior"))
         self.tab_widget.addTab(self.tab_about, tr("settings.about"))
         
-        layout.addWidget(self.tab_widget)
+        self.add_widget(self.tab_widget)
     
     def update_texts(self):
         """Update all UI texts with current language."""
-        self.lbl_title.setText(f"<h2>{tr('settings.title')}</h2>")
+        super().update_texts()
         
         # Update tab titles
         self.tab_widget.setTabText(0, tr("settings.appearance"))

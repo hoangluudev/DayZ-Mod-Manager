@@ -38,7 +38,9 @@ class ProfileManager:
         if profiles_dir:
             self._profiles_dir = Path(profiles_dir)
         else:
-            self._profiles_dir = Path(__file__).parent.parent.parent / "profiles"
+            # Use storage_paths module for proper path resolution
+            from src.core.storage_paths import get_profiles_path
+            self._profiles_dir = get_profiles_path()
         
         self._profiles_dir.mkdir(parents=True, exist_ok=True)
         self._profiles: Dict[str, ServerProfile] = {}

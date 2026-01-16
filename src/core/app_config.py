@@ -55,8 +55,9 @@ class AppConfigManager:
         if config_path:
             self._config_path = Path(config_path)
         else:
-            # Default: app.json in configs directory
-            self._config_path = Path(__file__).parent.parent.parent / "configs" / "app.json"
+            # Use storage_paths module for proper path resolution
+            from src.core.storage_paths import get_app_config_file_path
+            self._config_path = get_app_config_file_path()
         
         self._config = AppConfig()
         self._load_config()

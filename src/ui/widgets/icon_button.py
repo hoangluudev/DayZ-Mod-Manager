@@ -73,13 +73,18 @@ class IconButton(QPushButton):
             self.setText(text)
         
         if icon_only:
-            self.setFixedSize(size + 8, size + 8)
+            # Let the button size itself but provide sensible minimums
+            self.setMinimumSize(size + 4, size + 4)
+            self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            # Remove extra padding so icon is vertically centered
             self.setStyleSheet("""
                 QPushButton {
-                    padding: 4px;
-                    border-radius: 4px;
+                    padding: 0px;
+                    border-radius: 3px;
                 }
             """)
+            # ensure icon rendered at requested size
+            self.setIconSize(QSize(size, size))
         
         if object_name:
             self.setObjectName(object_name)

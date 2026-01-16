@@ -25,6 +25,12 @@ from src.core.settings_manager import SettingsManager
 from src.core.profile_manager import ProfileManager
 from src.core.default_restore import restore_server_defaults
 from src.utils.locale_manager import LocaleManager, tr
+from src.constants import (
+    SIDEBAR_ITEMS,
+    TabIndex,
+    WindowDimensions,
+    APP_DEFAULTS,
+)
 
 # Import UI components
 from src.ui.sidebar_widget import SidebarWidget
@@ -94,14 +100,15 @@ class MainWindow(QMainWindow):
     
     language_changed = Signal(str)
     
-    # Tab indices
-    TAB_PROFILES = 0
-    TAB_MODS = 1
-    TAB_CONFIG = 2
-    TAB_SETTINGS = 3
-    
     def __init__(self):
         super().__init__()
+
+        # First-run bootstrap (creates default configs in writable storage)
+        try:
+            from src.core.storage_paths import bootstrap_first_run
+            bootstrap_first_run()
+        except Exception:
+            pass
         
         # Initialize managers
         self.settings = SettingsManager()
@@ -121,17 +128,16 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._update_texts()
         
-        # Apply theme from settings with accent color
-        accent = self.settings.settings.accent_color or "#0078d4"
-        ThemeManager.apply_theme(self.settings.settings.theme, accent)
+        # Apply theme from settings
+        ThemeManager.apply_theme(self.settings.settings.theme)
         
         # Restore window state
         self._restore_window_state()
     
     def _setup_ui(self):
         """Initialize the user interface with sidebar layout."""
-        self.setWindowTitle(f"{tr('app.title')} v{get_version()}")
-        self.setMinimumSize(1200, 800)
+        self.setWindowTitle(tr('app.title'))
+        self.setMinimumSize(WindowDimensions.MIN_WIDTH, WindowDimensions.MIN_HEIGHT)
         
         # Central widget
         central = QWidget()
@@ -142,13 +148,11 @@ class MainWindow(QMainWindow):
         
         # Sidebar navigation
         self.sidebar = SidebarWidget()
-        self.sidebar.set_footer_text(f"v{get_version()}")
+        self.sidebar.set_footer_text("")
         
-        # Add navigation items with icon names (not emoji)
-        self.sidebar.add_item("folder", tr("tabs.profiles"))
-        self.sidebar.add_item("puzzle", tr("tabs.mods"))
-        self.sidebar.add_item("cog", tr("tabs.config"))
-        self.sidebar.add_item("settings", tr("tabs.settings"))
+        # Add navigation items from centralized constants
+        for nav_item in SIDEBAR_ITEMS:
+            self.sidebar.add_item(nav_item.icon_name, tr(nav_item.translation_key))
         
         self.sidebar.set_current_index(0)
         self.sidebar.item_selected.connect(self._on_sidebar_item_selected)
@@ -160,37 +164,6 @@ class MainWindow(QMainWindow):
         content_layout = QVBoxLayout(content_container)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-        
-        # Profile indicator bar
-        self.profile_bar = QFrame()
-        self.profile_bar.setObjectName("profileBar")
-        self.profile_bar.setFixedHeight(40)
-        self.profile_bar.setStyleSheet("""
-            QFrame#profileBar {
-                background-color: rgba(0, 120, 212, 0.1);
-                border-bottom: 1px solid rgba(0, 120, 212, 0.3);
-            }
-        """)
-        profile_bar_layout = QHBoxLayout(self.profile_bar)
-        profile_bar_layout.setContentsMargins(16, 0, 16, 0)
-        
-        self.lbl_current_profile = QLabel()
-        self.lbl_current_profile.setStyleSheet("font-weight: bold;")
-        profile_bar_layout.addWidget(self.lbl_current_profile)
-        
-        profile_bar_layout.addStretch()
-        
-        # Theme toggle button with SVG icon
-        self.btn_theme = IconButton(
-            icon_name="moon" if self.settings.settings.theme == "dark" else "sun",
-            size=20,
-            icon_only=True
-        )
-        self.btn_theme.setToolTip(tr("settings.theme"))
-        self.btn_theme.clicked.connect(self._toggle_theme)
-        profile_bar_layout.addWidget(self.btn_theme)
-        
-        content_layout.addWidget(self.profile_bar)
         
         # Stacked widget for page content
         self.stack = QStackedWidget()
@@ -214,7 +187,7 @@ class MainWindow(QMainWindow):
         # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage(tr("common.loading"))
+        self._update_status_bar()
     
     def _setup_menu(self):
         """Setup the menu bar."""
@@ -226,19 +199,8 @@ class MainWindow(QMainWindow):
         self.action_exit.triggered.connect(self.close)
         self.menu_file.addAction(self.action_exit)
         
-        # View menu (Theme)
+        # View menu
         self.menu_view = menubar.addMenu("")
-        
-        self.menu_theme = self.menu_view.addMenu("")
-        self.action_theme_system = QAction("🖥️ System", self)
-        self.action_theme_dark = QAction("🌙 Dark", self)
-        self.action_theme_light = QAction("☀️ Light", self)
-        self.action_theme_system.triggered.connect(lambda: self._set_theme("system"))
-        self.action_theme_dark.triggered.connect(lambda: self._set_theme("dark"))
-        self.action_theme_light.triggered.connect(lambda: self._set_theme("light"))
-        self.menu_theme.addAction(self.action_theme_system)
-        self.menu_theme.addAction(self.action_theme_dark)
-        self.menu_theme.addAction(self.action_theme_light)
         
         # Language submenu
         self.menu_language = self.menu_view.addMenu("")
@@ -254,6 +216,12 @@ class MainWindow(QMainWindow):
         self.action_about = QAction("", self)
         self.action_about.triggered.connect(self._show_about)
         self.menu_help.addAction(self.action_about)
+    
+    def _update_status_bar(self):
+        """Update status bar with version and current profile info."""
+        profile_name = self.current_profile.get("name", tr("common.none")) if self.current_profile else tr("common.none")
+        status_text = f"v{get_version()} | {tr('profiles.current')}: {profile_name}"
+        self.status_bar.showMessage(status_text)
     
     def _connect_signals(self):
         """Connect signals between tabs."""
@@ -271,7 +239,7 @@ class MainWindow(QMainWindow):
         """Handle sidebar navigation item selection."""
         # Check for unsaved changes if leaving config tab
         current_index = self.stack.currentIndex()
-        if current_index == self.TAB_CONFIG and self.tab_config.has_unsaved_changes():
+        if current_index == TabIndex.CONFIG and self.tab_config.has_unsaved_changes():
             dialog = UnsavedChangesDialog(self)
             if dialog.exec() == QDialog.Accepted:
                 action = dialog.get_result()
@@ -295,38 +263,23 @@ class MainWindow(QMainWindow):
         self.tab_config.set_profile(profile_data)
         self.tab_mods.set_profile(profile_data)
         
-        # Update profile indicator
-        profile_name = profile_data.get("name", "")
-        self.lbl_current_profile.setText(f"{tr('profiles.current')}: {profile_name}")
-        self.status_bar.showMessage(f"{tr('profiles.current')}: {profile_name}")
+        # Update status bar
+        self._update_status_bar()
     
-    def _toggle_theme(self):
-        """Toggle between dark and light themes."""
-        current = self.settings.settings.theme
-        if current == "dark":
-            new_theme = "light"
-            self.btn_theme.set_icon("sun")
-        else:
-            new_theme = "dark"
-            self.btn_theme.set_icon("moon")
-        
-        self._set_theme(new_theme)
-    
-    def _set_theme(self, theme: str):
-        """Set application theme."""
-        accent = self.settings.settings.accent_color or "#0078d4"
-        ThemeManager.apply_theme(theme, accent)
-        self.settings.settings.theme = theme
+    def _on_theme_changed(self, theme_id: str):
+        """Handle theme change from settings tab."""
+        if not theme_id:
+            return
+
+        ThemeManager.apply_theme(theme_id)
+        self.settings.settings.theme = theme_id
         self.settings.save()
-        
-        # Update button icon
-        if theme == "light":
-            self.btn_theme.set_icon("sun")
-        else:
-            self.btn_theme.set_icon("moon")
-        
+
         # Refresh sidebar icons
-        self.sidebar.refresh_icons()
+        try:
+            self.sidebar.refresh_icons()
+        except Exception:
+            pass
 
         # Refresh theme-aware logos (e.g., About tab)
         try:
@@ -335,38 +288,29 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
     
-    def _on_theme_changed(self, theme: str):
-        """Handle theme change from settings tab."""
-        self._set_theme(theme)
-    
     def _update_texts(self):
         """Update all UI texts with current language."""
         # Window title
         self.setWindowTitle(f"{tr('app.title')} v{get_version()}")
         
-        # Sidebar items with icon names
-        self.sidebar.update_item_text(0, "folder", tr("tabs.profiles"))
-        self.sidebar.update_item_text(1, "puzzle", tr("tabs.mods"))
-        self.sidebar.update_item_text(2, "cog", tr("tabs.config"))
-        self.sidebar.update_item_text(3, "settings", tr("tabs.settings"))
+        # Sidebar items from centralized constants
+        for nav_item in SIDEBAR_ITEMS:
+            self.sidebar.update_item_text(
+                nav_item.index,
+                nav_item.icon_name,
+                tr(nav_item.translation_key)
+            )
         
         # Menus
         self.menu_file.setTitle(tr("menu.file"))
         self.menu_view.setTitle(tr("menu.view"))
-        self.menu_theme.setTitle(tr("settings.theme"))
         self.menu_language.setTitle(tr("menu.language"))
         self.menu_help.setTitle(tr("menu.help"))
         self.action_exit.setText(tr("menu.exit"))
         self.action_about.setText(tr("menu.about"))
         
-        # Profile bar
-        if self.current_profile:
-            profile_name = self.current_profile.get("name", "")
-            self.lbl_current_profile.setText(f"{tr('profiles.current')}: {profile_name}")
-            self.status_bar.showMessage(f"{tr('profiles.current')}: {profile_name}")
-        else:
-            self.lbl_current_profile.setText(f"{tr('profiles.no_profiles')}")
-            self.status_bar.showMessage(tr("common.success"))
+        # Status bar
+        self._update_status_bar()
     
     def _update_all_texts(self):
         """Update texts in all tabs."""
@@ -396,8 +340,8 @@ class MainWindow(QMainWindow):
     
     def _restore_window_state(self):
         """Restore window size and position from settings."""
-        width = self.settings.settings.window_width or 1200
-        height = self.settings.settings.window_height or 800
+        width = self.settings.settings.window_width or WindowDimensions.DEFAULT_WIDTH
+        height = self.settings.settings.window_height or WindowDimensions.DEFAULT_HEIGHT
         self.resize(width, height)
         
         if self.settings.settings.window_maximized:

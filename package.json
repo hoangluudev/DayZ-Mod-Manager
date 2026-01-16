@@ -2,10 +2,16 @@
   "name": "dayzmodmanager",
   "private": true,
   "version": "0.0.0",
+  "description": "DayZ Mod Manager & Server Controller - Desktop Application",
   "scripts": {
     "start": "cmd /c python main.py",
+    "dev": "cmd /c set DAYZMM_ENV=dev && python main.py",
     "build:prod": "cmd /c build.bat prod nopause",
     "build:dev": "cmd /c build.bat dev nopause",
-    "clean": "cmd /c build.bat clean nopause"
+    "clean": "cmd /c build.bat clean nopause",
+    "lint": "cmd /c ruff check .",
+    "format": "cmd /c black .",
+    "typecheck": "cmd /c pyright",
+    "test": "cmd /c pytest -q"
   }
 }

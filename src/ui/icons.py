@@ -4,7 +4,7 @@ Provides consistent icons across the application that adapt to theme colors.
 """
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtSvg import QSvgRenderer
 from typing import Dict, Optional
@@ -157,29 +157,20 @@ class Icons:
     @classmethod
     def get_text_color(cls) -> str:
         """Get current text color based on theme."""
-        # With heavy QSS theming, QPalette values can become misleading.
-        # Prefer ThemeManager's current theme so monochrome icons keep contrast.
         try:
             from src.ui.theme_manager import ThemeManager
-
-            return "#e0e0e0" if ThemeManager.is_dark_theme() else "#1a1a1a"
+            return ThemeManager.get_text_color()
         except Exception:
-            app = QApplication.instance()
-            if app:
-                palette = app.palette()
-                color = palette.text().color()
-                return color.name()
             return "#e0e0e0"  # Default dark theme text color
     
     @classmethod
     def get_accent_color(cls) -> str:
-        """Get current accent color from settings or default."""
+        """Get current accent color from theme."""
         try:
-            from src.core.settings_manager import SettingsManager
-            settings = SettingsManager()
-            return settings.settings.accent_color or "#0078d4"
-        except:
-            return "#0078d4"
+            from src.ui.theme_manager import ThemeManager
+            return ThemeManager.get_accent_color()
+        except Exception:
+            return "#43a047"  # Default green accent
     
     @classmethod
     def available_icons(cls) -> list:
@@ -200,11 +191,43 @@ class Icons:
 
     @classmethod
     def get_app_logo_pixmap(cls, size: int = 96, variant: str = "auto") -> QPixmap:
-        """Load and scale the app logo as a QPixmap."""
+        """Load and scale the app logo as a QPixmap.
+
+        On dark themes, the default ('auto') variant is rendered as a monochrome
+        mark using the current theme text color so it always matches the theme.
+        """
         path = cls.get_app_logo_path(variant=variant)
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             return QPixmap()
+
+        # Resolve variant behavior.
+        effective_variant = (variant or "auto").lower()
+        if effective_variant == "auto":
+            try:
+                from src.ui.theme_manager import ThemeManager
+                effective_variant = "mono" if ThemeManager.is_dark_theme() else "color"
+            except Exception:
+                effective_variant = "mono"
+
+        if effective_variant == "mono":
+            try:
+                from src.ui.theme_manager import ThemeManager
+                mono_color = ThemeManager.get_text_color()
+            except Exception:
+                mono_color = "#e0e0e0"
+
+            img = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+            tinted = QImage(img.size(), QImage.Format_ARGB32)
+            tinted.fill(Qt.transparent)
+            p = QPainter(tinted)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.drawImage(0, 0, img)
+            p.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            p.fillRect(tinted.rect(), QColor(mono_color))
+            p.end()
+            pixmap = QPixmap.fromImage(tinted)
+
         if size and size > 0:
             return pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         return pixmap
@@ -221,24 +244,3 @@ class Icons:
         icon = QIcon(pixmap) if not pixmap.isNull() else QIcon()
         cls._icon_cache[cache_key] = icon
         return icon
-
-
-# Predefined accent colors for user selection
-ACCENT_COLORS = {
-    "blue": "#0078d4",
-    "teal": "#00897b",
-    "green": "#43a047",
-    "purple": "#7b1fa2",
-    "orange": "#f57c00",
-    "red": "#e53935",
-    "pink": "#d81b60",
-    "indigo": "#3949ab",
-}
-
-
-def get_accent_color_name(hex_color: str) -> str:
-    """Get the name of an accent color from its hex value."""
-    for name, color in ACCENT_COLORS.items():
-        if color.lower() == hex_color.lower():
-            return name
-    return "custom"

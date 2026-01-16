@@ -10,20 +10,12 @@ from dataclasses import dataclass, asdict, field
 from enum import Enum
 
 
-class Theme(Enum):
-    """Application theme options."""
-    DARK = "dark"
-    LIGHT = "light"
-    SYSTEM = "system"
-
-
 @dataclass
 class AppSettings:
     """Application settings data structure."""
-    # Appearance
-    theme: str = "dark"
+    # Appearance - simplified theme system (theme pack ID)
+    theme: str = "default"  # Theme pack ID (e.g., "default", "midnight")
     language: str = "en"
-    accent_color: str = "#0078d4"  # Primary accent color
     
     # Paths
     steamcmd_path: str = ""
@@ -99,8 +91,9 @@ class SettingsManager:
         if settings_path:
             self._settings_path = Path(settings_path)
         else:
-            # Default: settings.json in app config directory
-            self._settings_path = Path(__file__).parent.parent.parent / "configs" / "settings.json"
+            # Use storage_paths module for proper path resolution
+            from src.core.storage_paths import get_settings_file_path
+            self._settings_path = get_settings_file_path()
         
         self._auto_save = auto_save
         self._settings = AppSettings()

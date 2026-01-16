@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPoint
 
 from src.ui.widgets import IconButton
+from src.ui.theme_manager import ThemeManager
 from src.utils.locale_manager import tr
 
 
@@ -289,7 +290,9 @@ class ConfigTab(QWidget):
         
         # Current file indicator
         self.lbl_current_file = QLabel()
-        self.lbl_current_file.setStyleSheet("color: #0078d4; font-size: 12px;")
+        self.lbl_current_file.setStyleSheet(
+            f"color: {ThemeManager.get_accent_color()}; font-size: 12px;"
+        )
         content_layout.addWidget(self.lbl_current_file)
         
         # Server Info section

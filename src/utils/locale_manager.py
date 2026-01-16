@@ -5,6 +5,7 @@ Handles loading, switching, and retrieving localized strings.
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass
@@ -78,8 +79,9 @@ class LocaleManager:
         if locales_dir:
             self._locales_dir = Path(locales_dir)
         else:
-            # Default: locales folder in project root
-            self._locales_dir = Path(__file__).parent.parent.parent / "locales"
+            # Use storage_paths module for proper path resolution
+            from src.core.storage_paths import get_locales_path
+            self._locales_dir = get_locales_path()
         
         self._current_language: str = default_language
         self._fallback_language: str = "en"
@@ -91,6 +93,18 @@ class LocaleManager:
         
     def _load_all_translations(self) -> None:
         """Load all available locale files."""
+        if not self._locales_dir.exists():
+            # Fallbacks for frozen builds or unexpected layouts.
+            candidates = []
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "locales")
+            candidates.append(Path(sys.executable).parent / "locales")
+            for c in candidates:
+                if c.exists():
+                    self._locales_dir = c
+                    break
+
         if not self._locales_dir.exists():
             print(f"Warning: Locales directory not found: {self._locales_dir}")
             return

@@ -82,7 +82,8 @@ class PathSelector(QWidget):
                 display_path = "..." + display_path[-47:]
             self.lbl_path.setText(display_path)
             self.lbl_path.setToolTip(self._path)
-            self.lbl_path.setStyleSheet("color: inherit;")
+            # Clear local styling so the global theme stylesheet applies.
+            self.lbl_path.setStyleSheet("")
         else:
             self.lbl_path.setText(self._placeholder)
             self.lbl_path.setToolTip("")

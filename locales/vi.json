@@ -12,6 +12,9 @@
         "remove": "Gỡ bỏ",
         "browse": "Duyệt",
         "refresh": "Làm mới",
+    "theme": {
+        "default": "Mặc định"
+    },
         "close": "Đóng",
         "apply": "Áp dụng",
         "yes": "Có",
@@ -30,7 +33,8 @@
         "select_all": "Chọn tất cả",
         "deselect_all": "Bỏ chọn tất cả",
         "and": "và",
-        "more": "thêm"
+        "more": "thêm",
+        "none": "không"
     },
     "menu": {
         "file": "Tệp",
@@ -97,6 +101,8 @@
         "copy_mod": "Sao chép file Mod",
         "copy_bikey": "Sao chép file .bikey",
         "copy_all_bikeys": "Sao chép tất cả file .bikey",
+        "add_bikeys": "Thêm .bikeys",
+        "no_bikeys_to_copy": "Không có bikeys để sao chép",
         "workshop_list": "Mods từ Workshop",
         "selected": "Đã chọn",
         "integrity_check": "Kiểm tra toàn vẹn",
@@ -105,7 +111,7 @@
         "integrity_summary": "Hoàn tất kiểm tra toàn vẹn",
         "duplicates_found": "Phát hiện mod trùng lặp",
         "no_mods": "Không tìm thấy mod",
-        "no_mods_selected": "Chưa chọn mod để cài đặt",
+        "no_mods_selected": "Bạn chưa chọn mod nào. Tick vào checkbox rồi thử lại nhé.",
         "select_profile_first": "Vui lòng chọn hồ sơ trước",
         "checking": "Đang kiểm tra toàn vẹn mod...",
         "bikeys_copied": "Đã sao chép các file bikey",
@@ -132,6 +138,18 @@
         "confirm_remove": "Bạn có chắc muốn gỡ",
         "no_workshop_path": "Chưa cấu hình đường dẫn Workshop",
         "source_not_found": "Không tìm thấy nguồn trong workshop"
+        ,
+        "result_header": "Hoàn tất.",
+        "result_add_success": "Đã thêm {count} mod vào server.",
+        "result_remove_success": "Đã gỡ {count} mod khỏi server.",
+        "result_update_success": "Đã cập nhật {count} mod.",
+        "result_failed": "Không thể xử lý {count} mod.",
+        "result_failed_examples": "Một vài lỗi (tối đa {max}):",
+        "result_bikeys_copied": "Đã sao chép {count} file .bikey vào thư mục keys.",
+        "result_bikeys_removed": "Đã dọn {count} file .bikey khỏi thư mục keys.",
+        "result_tip_launcher": "Gợi ý: qua tab Cấu hình Khởi chạy để tạo/cập nhật start.bat.",
+        "mod_folder_not_found": "Không tìm thấy thư mục mod: {mod}",
+        "result_bikeys_copied_for_mod": "Đã thêm {count} file .bikey cho {mod}."
     },
     "launcher": {
         "title": "Khởi Chạy Server",
@@ -221,6 +239,10 @@
             "performance": "Hiệu suất",
             "storage": "Lưu trữ & Xây dựng",
             "logging": "Ghi log",
+            "config_files": "Tệp cấu hình",
+            "settings_file": "Tệp cài đặt",
+            "app_config_file": "Tệp cấu hình ứng dụng",
+            "open_config_folder": "Mở thư mục cấu hình",
             "mission": "Nhiệm vụ / Bản đồ"
         },
         "tooltip": {
@@ -265,11 +287,7 @@
         "title": "Cài Đặt Ứng Dụng",
         "appearance": "Giao diện",
         "theme": "Chủ đề",
-        "theme_dark": "Tối",
-        "theme_light": "Sáng",
-        "theme_system": "Mặc định hệ thống",
-        "accent_color": "Màu chủ đạo",
-        "accent_color_desc": "Chọn màu chủ đạo cho ứng dụng",
+        "theme_desc": "Chọn chủ đề giao diện ưa thích",
         "language": "Ngôn ngữ",
         "language_desc": "Chọn ngôn ngữ ưa thích của bạn",
         "select_language": "Chọn ngôn ngữ",

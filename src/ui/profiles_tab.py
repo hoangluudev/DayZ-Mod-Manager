@@ -14,9 +14,12 @@ from src.utils.locale_manager import tr
 from src.ui.profile_dialog import ProfileDialog
 from src.ui.icons import Icons
 from src.ui.widgets import IconButton
+from src.ui.base import BaseTab, CardWidget, EmptyStateWidget
+from src.ui.factories import create_action_button, create_status_label
+from src.ui.theme_manager import ThemeManager
 
 
-class ProfileCard(QFrame):
+class ProfileCard(CardWidget):
     """A card widget displaying profile information."""
     
     selected = Signal(str)  # profile name
@@ -24,19 +27,15 @@ class ProfileCard(QFrame):
     delete_requested = Signal(str)
     
     def __init__(self, profile_data: dict, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, clickable=True)
         self.profile_data = profile_data
         self.name = profile_data.get("name", "Unknown")
-        
-        self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        self.setCursor(Qt.PointingHandCursor)
-        
         self._setup_ui()
+        
+        # Connect click to selection
+        self.clicked.connect(lambda: self.selected.emit(self.name))
     
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        
         # Header with name and buttons
         header = QHBoxLayout()
         
@@ -45,27 +44,21 @@ class ProfileCard(QFrame):
         header.addWidget(self.lbl_name)
         header.addStretch()
         
-        # Edit button with SVG icon
-        self.btn_edit = IconButton(
-            icon_name="edit",
-            size=18,
-            icon_only=True
+        # Edit button
+        self.btn_edit = create_action_button(
+            "edit", tooltip=tr("common.edit"), size=18, icon_only=True,
+            on_click=lambda: self.edit_requested.emit(self.name)
         )
-        self.btn_edit.setToolTip(tr("common.edit"))
-        self.btn_edit.clicked.connect(lambda: self.edit_requested.emit(self.name))
         header.addWidget(self.btn_edit)
         
-        # Delete button with SVG icon
-        self.btn_delete = IconButton(
-            icon_name="trash",
-            size=18,
-            icon_only=True
+        # Delete button
+        self.btn_delete = create_action_button(
+            "trash", tooltip=tr("common.delete"), size=18, icon_only=True,
+            on_click=lambda: self.delete_requested.emit(self.name)
         )
-        self.btn_delete.setToolTip(tr("common.delete"))
-        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(self.name))
         header.addWidget(self.btn_delete)
         
-        layout.addLayout(header)
+        self.card_layout.addLayout(header)
         
         # Server path with folder icon
         server_path = self.profile_data.get("server_path", "")
@@ -81,101 +74,76 @@ class ProfileCard(QFrame):
         self.lbl_path.setWordWrap(True)
         path_layout.addWidget(self.lbl_path, stretch=1)
         
-        layout.addLayout(path_layout)
+        self.card_layout.addLayout(path_layout)
         
         # Status
-        self._check_status(server_path)
+        self._add_status(server_path)
     
-    def _check_status(self, server_path: str):
-        """Check if server path is valid."""
+    def _add_status(self, server_path: str):
+        """Check if server path is valid and show status."""
         path = Path(server_path)
         exe_exists = (path / "DayZServer_x64.exe").exists() if path.exists() else False
         
-        status_layout = QHBoxLayout()
-        status_layout.setSpacing(4)
-        
         if exe_exists:
-            status_text = tr('validation.server_valid')
-            icon_name = "success"
-            color = "#4caf50"
+            status_widget = create_status_label(
+                tr('validation.server_valid'), "success"
+            )
         elif path.exists():
-            status_text = tr('validation.server_not_found')
-            icon_name = "warning"
-            color = "#ff9800"
+            status_widget = create_status_label(
+                tr('validation.server_not_found'), "warning"
+            )
         else:
-            status_text = tr('validation.invalid_path')
-            icon_name = "error"
-            color = "#f44336"
+            status_widget = create_status_label(
+                tr('validation.invalid_path'), "error"
+            )
         
-        status_icon = QLabel()
-        status_icon.setPixmap(Icons.get_pixmap(icon_name, color=color, size=14))
-        status_layout.addWidget(status_icon)
-        
-        self.lbl_status = QLabel(status_text)
-        self.lbl_status.setStyleSheet(f"color: {color}; font-size: 11px;")
-        status_layout.addWidget(self.lbl_status)
-        status_layout.addStretch()
-        
-        self.layout().addLayout(status_layout)
-    
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.selected.emit(self.name)
-        super().mousePressEvent(event)
+        self.card_layout.addWidget(status_widget)
 
 
-class ProfilesTab(QWidget):
+class ProfilesTab(BaseTab):
     """Tab for managing server profiles."""
     
     profile_selected = Signal(dict)  # Emits selected profile data
     
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, scrollable=False, title_key="profiles.title")
         self.profile_manager = ProfileManager()
         self.current_profile = None
         
-        self._setup_ui()
+        self._setup_content()
         self._load_profiles()
     
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        
-        # Header
-        header = QHBoxLayout()
-        
-        self.lbl_title = QLabel(f"<h2>{tr('profiles.title')}</h2>")
-        header.addWidget(self.lbl_title)
-        header.addStretch()
-        
-        self.btn_new = IconButton(
-            icon_name="plus",
-            text=tr('profiles.new_profile'),
-            size=16
+    def _setup_content(self):
+        # Add new profile button to header
+        self.btn_new = create_action_button(
+            "plus", text=tr('profiles.new_profile'), size=16,
+            on_click=self._create_profile
         )
         self.btn_new.setStyleSheet("padding: 8px 16px;")
-        self.btn_new.clicked.connect(self._create_profile)
-        header.addWidget(self.btn_new)
-        
-        layout.addLayout(header)
+        self.add_header_button(self.btn_new)
         
         # Current profile indicator
         self.lbl_current = QLabel()
-        self.lbl_current.setStyleSheet("color: #0078d4; font-size: 12px; padding: 4px 0;")
-        layout.addWidget(self.lbl_current)
+        self.lbl_current.setStyleSheet(
+            f"color: {ThemeManager.get_accent_color()}; font-size: 12px; padding: 4px 0;"
+        )
+        self.add_widget(self.lbl_current)
         
         # Profiles container
         self.profiles_layout = QVBoxLayout()
         self.profiles_layout.setSpacing(8)
-        layout.addLayout(self.profiles_layout)
+        self.add_layout(self.profiles_layout)
         
         # Empty state
-        self.lbl_empty = QLabel(tr("profiles.no_profiles"))
-        self.lbl_empty.setAlignment(Qt.AlignCenter)
-        self.lbl_empty.setStyleSheet("color: gray; padding: 50px; font-size: 14px;")
-        layout.addWidget(self.lbl_empty)
+        self.empty_state = EmptyStateWidget(
+            message=tr("profiles.no_profiles"),
+            icon_name="folder",
+            action_text=tr("profiles.new_profile"),
+        )
+        self.empty_state.action_clicked.connect(self._create_profile)
+        self.add_widget(self.empty_state)
         
-        layout.addStretch()
+        self.add_stretch()
     
     def _load_profiles(self):
         """Load and display all profiles."""
@@ -188,11 +156,11 @@ class ProfilesTab(QWidget):
         profiles = self.profile_manager.get_all_profiles()
         
         if not profiles:
-            self.lbl_empty.show()
+            self.empty_state.show()
             self.lbl_current.hide()
             return
         
-        self.lbl_empty.hide()
+        self.empty_state.hide()
         
         for profile in profiles:
             profile_data = {
@@ -282,15 +250,7 @@ class ProfilesTab(QWidget):
     
     def _delete_profile(self, name: str):
         """Delete a profile after confirmation."""
-        reply = QMessageBox.question(
-            self,
-            tr("common.confirm"),
-            tr("profiles.confirm_delete"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
+        if self.confirm_dialog(tr("profiles.confirm_delete")):
             self.profile_manager.delete_profile(name)
             if self.current_profile == name:
                 self.current_profile = None
@@ -298,8 +258,9 @@ class ProfilesTab(QWidget):
     
     def update_texts(self):
         """Update UI texts for language change."""
-        self.lbl_title.setText(f"<h2>{tr('profiles.title')}</h2>")
+        super().update_texts()
         self.btn_new.setText(tr('profiles.new_profile'))
-        self.lbl_empty.setText(tr("profiles.no_profiles"))
+        self.empty_state.set_message(tr("profiles.no_profiles"))
+        self.empty_state.set_action_text(tr("profiles.new_profile"))
         self._update_current_indicator()
         self._load_profiles()

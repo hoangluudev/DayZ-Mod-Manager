@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Optional
 import shutil
 
+from src.core.storage_paths import get_defaults_path
+
 
 @dataclass(frozen=True)
 class RestoreResult:
@@ -22,13 +24,8 @@ class RestoreResult:
     server_cfg_path: Path
 
 
-def _project_root() -> Path:
-    # src/core/default_restore.py -> src/core -> src -> project root
-    return Path(__file__).resolve().parents[2]
-
-
 def defaults_dir() -> Path:
-    return _project_root() / "configs" / "defaults"
+    return get_defaults_path()
 
 
 def default_start_bat_template() -> Path:

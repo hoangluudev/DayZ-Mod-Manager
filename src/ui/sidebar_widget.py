@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QStyleOptionViewItem
 
 from src.ui.icons import Icons
 from src.ui.theme_manager import ThemeManager
+from src.constants.ui import SidebarDimensions
 
 
 class _SidebarBrandingHeader(QFrame):
@@ -18,12 +19,12 @@ class _SidebarBrandingHeader(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._accent = "#0078d4"
+        self._accent = "#43a047"
         self._dark = True
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_theme(self, accent: str, dark: bool):
-        self._accent = accent or "#0078d4"
+        self._accent = accent or "#43a047"
         self._dark = bool(dark)
         self.update()
 
@@ -115,15 +116,24 @@ class _CollapsedIconDelegate(QStyledItemDelegate):
 
         hovered = bool(opt.state & QStyle.State_MouseOver)
         selected = bool(opt.state & QStyle.State_Selected)
+        
+        # Detect if we're in dark or light mode
+        is_dark = ThemeManager.is_dark_theme()
 
-        # Background (match the previous QSS intent).
+        # Background - use theme-aware colors
         if selected:
-            bg = QColor(255, 255, 255, 15)  # ~0.06
+            if is_dark:
+                bg = QColor(255, 255, 255, 15)  # ~0.06 for dark
+            else:
+                bg = QColor(0, 0, 0, 18)  # ~0.07 for light
             painter.setPen(Qt.NoPen)
             painter.setBrush(bg)
             painter.drawRoundedRect(QRectF(tile_rect), self._tile_radius, self._tile_radius)
         elif hovered:
-            bg = QColor(255, 255, 255, 9)  # ~0.035
+            if is_dark:
+                bg = QColor(255, 255, 255, 9)  # ~0.035 for dark
+            else:
+                bg = QColor(0, 0, 0, 12)  # ~0.05 for light
             painter.setPen(Qt.NoPen)
             painter.setBrush(bg)
             painter.drawRoundedRect(QRectF(tile_rect), self._tile_radius, self._tile_radius)
@@ -131,9 +141,9 @@ class _CollapsedIconDelegate(QStyledItemDelegate):
         # Accent bar when selected.
         if selected:
             try:
-                accent = QColor(ThemeManager.get_current_accent())
+                accent = QColor(ThemeManager.get_accent_color())
             except Exception:
-                accent = QColor("#0078d4")
+                accent = QColor("#43a047")
             accent.setAlpha(220)
 
             bar_w = max(1, self._accent_bar_width)
@@ -167,25 +177,23 @@ class SidebarWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._expanded_width = 220
-        self._collapsed_width = 76
+        # Use centralized dimension constants
+        self._expanded_width = SidebarDimensions.EXPANDED_WIDTH
+        self._collapsed_width = SidebarDimensions.COLLAPSED_WIDTH
         self.setMinimumWidth(self._expanded_width)
         self.setMaximumWidth(self._expanded_width)
         # Icon size used for sidebar items (width, height)
-        # Reverted to original small size for menu icons
-        self._sidebar_icon_size = 20
+        self._sidebar_icon_size = SidebarDimensions.ICON_SIZE
         # Branding/logo sizing is adaptive (based on sidebar width)
-        # Expanded: show a prominent logo badge.
-        # Collapsed: show a compact icon-only logo.
-        self._logo_expanded_min_size = 112
-        self._logo_expanded_max_size = 150
-        self._logo_collapsed_min_size = 26
-        self._logo_collapsed_max_size = 44
+        self._logo_expanded_min_size = SidebarDimensions.LOGO_EXPANDED_MIN
+        self._logo_expanded_max_size = SidebarDimensions.LOGO_EXPANDED_MAX
+        self._logo_collapsed_min_size = SidebarDimensions.LOGO_COLLAPSED_MIN
+        self._logo_collapsed_max_size = SidebarDimensions.LOGO_COLLAPSED_MAX
 
         # Collapsed sidebar item sizing
-        self._collapsed_item_h = 56
-        self._collapsed_item_gap = 6
-        self._collapsed_tile_w = 56
+        self._collapsed_item_h = SidebarDimensions.COLLAPSED_ITEM_HEIGHT
+        self._collapsed_item_gap = SidebarDimensions.COLLAPSED_ITEM_SPACING
+        self._collapsed_tile_w = SidebarDimensions.COLLAPSED_TILE_WIDTH
 
         self._collapsed = False
         self.setProperty("collapsed", False)
@@ -193,11 +201,13 @@ class SidebarWidget(QWidget):
         self._width_anim_min: QPropertyAnimation | None = None
         self._width_anim_max: QPropertyAnimation | None = None
         self._items = []  # Store item data (icon_name, text)
+        self._footer_text = ""
         self._setup_ui()
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Small bottom margin so the collapse/expand button sits slightly above the window bottom.
+        layout.setContentsMargins(0, 0, 0, 2)
         layout.setSpacing(0)
         
         # App branding header (logo only — no title text)
@@ -263,13 +273,7 @@ class SidebarWidget(QWidget):
         
         layout.addWidget(self.nav_list, stretch=1)
 
-        # Bottom controls (collapse button + footer)
-        bottom = QFrame()
-        bottom.setObjectName("sidebarBottom")
-        bottom_layout = QVBoxLayout(bottom)
-        bottom_layout.setContentsMargins(10, 8, 10, 10)
-        bottom_layout.setSpacing(6)
-
+        # Collapse button
         self.btn_collapse = QPushButton()
         self.btn_collapse.setObjectName("sidebarCollapseBtn")
         self.btn_collapse.setCursor(Qt.PointingHandCursor)
@@ -278,23 +282,25 @@ class SidebarWidget(QWidget):
         self.btn_collapse.setIconSize(QSize(18, 18))
         self.btn_collapse.setToolTip("Collapse sidebar")
         self.btn_collapse.clicked.connect(self.toggle_collapsed)
-        bottom_layout.addWidget(self.btn_collapse)
+        layout.addWidget(self.btn_collapse)
 
         # Ensure correct icon on first paint.
         self._refresh_collapse_button()
         
+        # Bottom info bar (footer)
         self.footer = QLabel()
-        self.footer.setStyleSheet("color: #666; font-size: 10px; padding: 8px 16px;")
+        self.footer.setStyleSheet("color: #666; font-size: 10px;")
         self.footer.setAlignment(Qt.AlignCenter)
-        bottom_layout.addWidget(self.footer)
-
-        layout.addWidget(bottom)
+        # Reserve footer height so toggling collapsed/expanded doesn't move the button vertically.
+        self.footer.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.footer.setFixedHeight(max(12, int(self.footer.sizeHint().height())))
+        layout.addWidget(self.footer)
     
     def add_item(self, icon_name: str, text: str):
         """Add a navigation item with SVG icon."""
         item = QListWidgetItem(text)
         # Keep the original item height for menu items
-        item.setSizeHint(QSize(0, 44))
+        item.setSizeHint(QSize(0, SidebarDimensions.ITEM_HEIGHT))
 
         icon = Icons.get_icon(icon_name, size=self._sidebar_icon_size)
         item.setIcon(icon)
@@ -314,7 +320,7 @@ class SidebarWidget(QWidget):
             item.setTextAlignment(Qt.AlignCenter)
             # Use full-width rows in collapsed mode so icon can be centered perfectly.
             item.setSizeHint(QSize(max(0, self.nav_list.viewport().width()), self._collapsed_item_h))
-            item.setIcon(Icons.get_icon(icon_name, size=22))
+            item.setIcon(Icons.get_icon(icon_name, size=SidebarDimensions.COLLAPSED_ICON_SIZE))
     
     def set_current_index(self, index: int):
         """Set the current selected index."""
@@ -333,12 +339,12 @@ class SidebarWidget(QWidget):
                 item.setText("")
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setSizeHint(QSize(max(0, self.nav_list.viewport().width()), self._collapsed_item_h))
-                item.setIcon(Icons.get_icon(icon_name, size=22))
+                item.setIcon(Icons.get_icon(icon_name, size=SidebarDimensions.COLLAPSED_ICON_SIZE))
             else:
                 item.setToolTip("")
                 item.setText(text)
                 item.setTextAlignment(Qt.AlignVCenter)
-                item.setSizeHint(QSize(0, 44))
+                item.setSizeHint(QSize(0, SidebarDimensions.ITEM_HEIGHT))
                 item.setIcon(Icons.get_icon(icon_name, size=self._sidebar_icon_size))
             
             # Update stored data
@@ -347,7 +353,7 @@ class SidebarWidget(QWidget):
     
     def refresh_icons(self):
         """Refresh all icons (call after theme change)."""
-        size = 22 if self._collapsed else self._sidebar_icon_size
+        size = SidebarDimensions.COLLAPSED_ICON_SIZE if self._collapsed else self._sidebar_icon_size
         for i, (icon_name, text) in enumerate(self._items):
             item = self.nav_list.item(i)
             if item:
@@ -381,19 +387,21 @@ class SidebarWidget(QWidget):
         """Update logo/badge sizing based on current sidebar width."""
         logo_size = self._compute_logo_size()
 
-        # Tighten padding/margins when collapsed.
+        # Tighten padding/margins when collapsed - center logo properly
         if getattr(self, "_badge_layout", None) is not None:
-            pad = 6 if self._collapsed else 10
+            pad = 4 if self._collapsed else 10
             self._badge_layout.setContentsMargins(pad, pad, pad, pad)
         if getattr(self, "_header_layout", None) is not None:
-            self._header_layout.setContentsMargins(12, 12, 12, 12)
+            # Use minimal margins when collapsed for better centering
+            margin = 4 if self._collapsed else 12
+            self._header_layout.setContentsMargins(margin, margin, margin, margin)
 
-        badge_pad = 12 if self._collapsed else 20
+        badge_pad = 8 if self._collapsed else 20
         badge_size = logo_size + badge_pad
 
         self.logo_label.setFixedSize(logo_size, logo_size)
         self.logo_badge.setFixedSize(badge_size, badge_size)
-        self.header.setFixedHeight(badge_size + (24 if self._collapsed else 28))
+        self.header.setFixedHeight(badge_size + (16 if self._collapsed else 28))
         self._refresh_logo()
 
     def _sync_collapsed_grid(self):
@@ -426,9 +434,9 @@ class SidebarWidget(QWidget):
     def _apply_branding_effects(self):
         """Apply a subtle shadow to the logo badge (theme/accent aware)."""
         try:
-            accent = ThemeManager.get_current_accent()
+            accent = ThemeManager.get_accent_color()
         except Exception:
-            accent = "#0078d4"
+            accent = "#43a047"
 
         try:
             self.header.set_theme(accent=accent, dark=ThemeManager.is_dark_theme())
@@ -474,7 +482,7 @@ class SidebarWidget(QWidget):
 
         # Update list to icon-only mode.
         if collapsed:
-            self._collapsed_delegate.set_icon_size(22)
+            self._collapsed_delegate.set_icon_size(SidebarDimensions.COLLAPSED_ICON_SIZE)
             self._collapsed_delegate.set_tile_width(self._collapsed_tile_w)
             self.nav_list.setItemDelegate(self._collapsed_delegate)
             for i, (icon_name, text) in enumerate(self._items):
@@ -484,14 +492,15 @@ class SidebarWidget(QWidget):
                     item.setText("")
                     item.setTextAlignment(Qt.AlignCenter)
                     item.setSizeHint(QSize(max(0, self.nav_list.viewport().width()), self._collapsed_item_h))
-                    item.setIcon(Icons.get_icon(icon_name, size=22))
+                    item.setIcon(Icons.get_icon(icon_name, size=SidebarDimensions.COLLAPSED_ICON_SIZE))
 
             # Use ListMode rows + delegate centering for pixel-perfect alignment.
             self.nav_list.setViewMode(QListView.ListMode)
             self.nav_list.setSpacing(self._collapsed_item_gap)
-            self.nav_list.setIconSize(QSize(22, 22))
+            self.nav_list.setIconSize(QSize(SidebarDimensions.COLLAPSED_ICON_SIZE, SidebarDimensions.COLLAPSED_ICON_SIZE))
             self._sync_collapsed_rows()
-            self.footer.setVisible(False)
+            # Keep footer space reserved so the button height stays consistent.
+            self.footer.setText("")
             self.btn_collapse.setToolTip("Expand sidebar")
             # Apply a narrow, local stylesheet to remove leftover padding
             self.nav_list.setStyleSheet(
@@ -505,13 +514,13 @@ class SidebarWidget(QWidget):
                     item.setToolTip("")
                     item.setText(text)
                     item.setTextAlignment(Qt.AlignVCenter)
-                    item.setSizeHint(QSize(0, 44))
+                    item.setSizeHint(QSize(0, SidebarDimensions.ITEM_HEIGHT))
                     item.setIcon(Icons.get_icon(icon_name, size=self._sidebar_icon_size))
 
             self.nav_list.setViewMode(QListView.ListMode)
-            self.nav_list.setSpacing(2)
+            self.nav_list.setSpacing(SidebarDimensions.ITEM_SPACING)
             self.nav_list.setIconSize(QSize(self._sidebar_icon_size, self._sidebar_icon_size))
-            self.footer.setVisible(True)
+            self.footer.setText(self._footer_text)
             self.btn_collapse.setToolTip("Collapse sidebar")
             # Clear local overrides so global stylesheet takes effect again
             self.nav_list.setStyleSheet("")
@@ -541,7 +550,7 @@ class SidebarWidget(QWidget):
         self._width_anim_min = QPropertyAnimation(self, b"minimumWidth")
         self._width_anim_max = QPropertyAnimation(self, b"maximumWidth")
         for anim in (self._width_anim_min, self._width_anim_max):
-            anim.setDuration(220)
+            anim.setDuration(SidebarDimensions.COLLAPSE_ANIMATION_DURATION)
             anim.setEasingCurve(QEasingCurve.InOutCubic)
             anim.setStartValue(start)
             anim.setEndValue(target)
@@ -555,7 +564,11 @@ class SidebarWidget(QWidget):
     
     def set_footer_text(self, text: str):
         """Set footer text (e.g., version info)."""
-        self.footer.setText(text)
+        self._footer_text = text or ""
+        if self._collapsed:
+            self.footer.setText("")
+        else:
+            self.footer.setText(self._footer_text)
     
     def _on_row_changed(self, row: int):
         """Handle row selection change."""

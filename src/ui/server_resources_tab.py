@@ -26,6 +26,7 @@ from PySide6.QtGui import QIcon, QColor, QFont, QSyntaxHighlighter, QTextCharFor
 
 from src.utils.locale_manager import tr
 from src.ui.icons import Icons
+from src.ui.theme_manager import ThemeManager
 from src.ui.widgets import IconButton
 
 
@@ -173,7 +174,9 @@ class FileEditorDialog(QDialog):
         header = QHBoxLayout()
         
         self.lbl_path = QLabel()
-        self.lbl_path.setStyleSheet("color: #0078d4; font-size: 12px;")
+        self.lbl_path.setStyleSheet(
+            f"color: {ThemeManager.get_accent_color()}; font-size: 12px;"
+        )
         header.addWidget(self.lbl_path)
         
         header.addStretch()
@@ -613,7 +616,9 @@ class ResourcesBrowserWidget(QWidget):
         # Root path indicator
         header = QHBoxLayout()
         self.lbl_root = QLabel("")
-        self.lbl_root.setStyleSheet("color: #0078d4; font-size: 12px;")
+        self.lbl_root.setStyleSheet(
+            f"color: {ThemeManager.get_accent_color()}; font-size: 12px;"
+        )
         header.addWidget(self.lbl_root)
         header.addStretch()
 

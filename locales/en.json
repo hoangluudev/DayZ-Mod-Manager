@@ -30,7 +30,8 @@
         "select_all": "Select All",
         "deselect_all": "Deselect All",
         "and": "and",
-        "more": "more"
+        "more": "more",
+        "none": "none"
     },
     "menu": {
         "file": "File",
@@ -40,6 +41,9 @@
         "about": "About",
         "exit": "Exit",
         "language": "Language"
+    },
+    "theme": {
+        "default": "Default"
     },
     "tabs": {
         "profiles": "Profiles",
@@ -97,6 +101,8 @@
         "copy_mod": "Copy Mod Files",
         "copy_bikey": "Copy .bikey Files",
         "copy_all_bikeys": "Copy All .bikey Files",
+        "add_bikeys": "Add .bikeys",
+        "no_bikeys_to_copy": "No bikeys to copy",
         "workshop_list": "Workshop Mods",
         "selected": "Selected",
         "integrity_check": "Integrity Check",
@@ -105,7 +111,7 @@
         "integrity_summary": "Integrity check complete",
         "duplicates_found": "Duplicate mods detected",
         "no_mods": "No mods found",
-        "no_mods_selected": "No mods selected for installation",
+        "no_mods_selected": "No mods selected. Tick the checkbox(es) and try again.",
         "select_profile_first": "Please select a profile first",
         "checking": "Checking mod integrity...",
         "bikeys_copied": "Bikey files copied",
@@ -132,6 +138,18 @@
         "confirm_remove": "Are you sure you want to remove",
         "no_workshop_path": "Workshop path not configured",
         "source_not_found": "Source not found in workshop"
+        ,
+        "result_header": "All set.",
+        "result_add_success": "Added {count} mod(s) to the server.",
+        "result_remove_success": "Removed {count} mod(s) from the server.",
+        "result_update_success": "Updated {count} mod(s).",
+        "result_failed": "Couldn't process {count} mod(s).",
+        "result_failed_examples": "A few errors (up to {max}):",
+        "result_bikeys_copied": "Copied {count} .bikey file(s) to the server keys folder.",
+        "result_bikeys_removed": "Removed {count} .bikey file(s) from the server keys folder.",
+        "result_tip_launcher": "Tip: open the Launcher tab to regenerate/update start.bat.",
+        "mod_folder_not_found": "Mod folder not found: {mod}",
+        "result_bikeys_copied_for_mod": "Added {count} .bikey file(s) for {mod}."
     },
     "launcher": {
         "title": "Server Launcher",
@@ -265,14 +283,14 @@
         "title": "Application Settings",
         "appearance": "Appearance",
         "theme": "Theme",
-        "theme_dark": "Dark",
-        "theme_light": "Light",
-        "theme_system": "System Default",
-        "accent_color": "Accent Color",
-        "accent_color_desc": "Choose an accent color for the application",
+        "theme_desc": "Select your preferred theme",
         "language": "Language",
         "language_desc": "Select your preferred language",
         "select_language": "Select Language",
+        "config_files": "Config Files",
+        "settings_file": "Settings file",
+        "app_config_file": "App config file",
+        "open_config_folder": "Open config folder",
         "restore_app_defaults": "Restore App Defaults",
         "restore_defaults": "Restore Defaults",
         "restore_section": "Restore Default Files",

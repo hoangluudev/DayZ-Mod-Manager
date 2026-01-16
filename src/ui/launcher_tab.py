@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
 from src.ui.widgets import IconButton
+from src.ui.theme_manager import ThemeManager
 from src.utils.locale_manager import tr
 from src.core.default_restore import default_start_bat_template
 
@@ -98,7 +99,9 @@ class LauncherTab(QWidget):
         
         # Current file indicator
         self.lbl_current_file = QLabel()
-        self.lbl_current_file.setStyleSheet("color: #0078d4; font-size: 12px;")
+        self.lbl_current_file.setStyleSheet(
+            f"color: {ThemeManager.get_accent_color()}; font-size: 12px;"
+        )
         content_layout.addWidget(self.lbl_current_file)
         
         # Configuration section
