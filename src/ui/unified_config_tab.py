@@ -25,6 +25,7 @@ from src.ui.widgets import IconButton
 from src.ui.server_resources_tab import ResourcesBrowserWidget
 from src.ui.highlighters import ModsListHighlighter
 from src.ui.dialogs.mod_sort_dialog import ModSortDialog
+from src.ui.dialogs.mission_merge_dialog import MissionConfigMergeDialog
 from src.constants.config import (
     CONFIG_FIELDS, ConfigFieldDef, AVAILABLE_MAPS, 
     LAUNCHER_DEFAULTS, get_mod_priority
@@ -77,6 +78,12 @@ class UnifiedConfigTab(QWidget):
         self.lbl_title = QLabel(f"<h2>{tr('config.unified_title')}</h2>")
         header.addWidget(self.lbl_title)
         header.addStretch()
+
+        # Mission config merger
+        self.btn_mission_merger_header = IconButton("cog", tr("mission_merge.open_mission_merger"), size=16)
+        self.btn_mission_merger_header.setEnabled(False)
+        self.btn_mission_merger_header.clicked.connect(self._open_mission_merger)
+        header.addWidget(self.btn_mission_merger_header)
         
         # Restore button
         self.btn_restore = IconButton("undo", tr("config.restore_changes"), size=16)
@@ -330,6 +337,20 @@ class UnifiedConfigTab(QWidget):
         # Mission/Map section
         scroll_layout.addWidget(self._create_mission_section())
         
+        # Mission Config Merger button
+        merger_box = QGroupBox(tr("mission_merge.title"))
+        merger_layout = QVBoxLayout(merger_box)
+        
+        merger_info = QLabel(tr("mission_merge.open_mission_merger"))
+        merger_info.setStyleSheet("color: gray; font-size: 11px;")
+        merger_layout.addWidget(merger_info)
+        
+        self.btn_mission_merger = IconButton("cog", tr("mission_merge.open_mission_merger"), size=16)
+        self.btn_mission_merger.clicked.connect(self._open_mission_merger)
+        merger_layout.addWidget(self.btn_mission_merger)
+        
+        scroll_layout.addWidget(merger_box)
+        
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
@@ -462,6 +483,9 @@ class UnifiedConfigTab(QWidget):
         self.current_profile = profile_data
         self.lbl_no_profile.setVisible(False)
         self.content_widget.setVisible(True)
+
+        if hasattr(self, "btn_mission_merger_header"):
+            self.btn_mission_merger_header.setEnabled(True)
         
         server_path = profile_data.get("server_path", "")
         self.txt_server_location.setText(server_path)
@@ -1058,6 +1082,29 @@ goto start
             return
         self.lbl_mods_warnings.setText(tr("launcher.mods_format_warning_inline"))
     
+    def _open_mission_merger(self):
+        """Open the Mission Config Merger dialog."""
+        if not self.current_profile:
+            QMessageBox.warning(self, tr("common.warning"), tr("config.select_profile_first"))
+            return
+        
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+        
+        mission_template = self.cmb_map.currentData() or "dayzOffline.chernarusplus"
+        
+        dialog = MissionConfigMergeDialog(server_path, mission_template, self)
+        dialog.merge_completed.connect(self._on_mission_merge_completed)
+        dialog.exec()
+    
+    def _on_mission_merge_completed(self, result: dict):
+        """Handle mission merge completion."""
+        # Refresh resources browser if visible
+        if hasattr(self, 'tab_map_resources'):
+            self.tab_map_resources.refresh()
+    
     def has_unsaved_changes(self) -> bool:
         """Check if there are unsaved changes."""
         return self.change_manager.has_unsaved_changes()
@@ -1065,6 +1112,8 @@ goto start
     def update_texts(self):
         """Update UI texts for language change."""
         self.lbl_title.setText(f"<h2>{tr('config.unified_title')}</h2>")
+        if hasattr(self, "btn_mission_merger_header"):
+            self.btn_mission_merger_header.setText(tr("mission_merge.open_mission_merger"))
         self.btn_restore.setText(tr("config.restore_changes"))
         self.btn_save.setText(tr("common.save"))
         self.lbl_no_profile.setText(tr("config.select_profile_first"))
