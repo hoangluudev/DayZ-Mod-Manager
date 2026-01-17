@@ -1,5 +1,15 @@
+# Build outputs
 build/
 dist/
+
+# PyInstaller
 *.spec
+
+# Python bytecode
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Local env
+venv/
+env/
