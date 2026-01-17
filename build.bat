@@ -13,12 +13,16 @@ REM   build.bat nopause         -> do not pause at the end (can be combined)
 
 cd /d "%~dp0"
 
+set "PF86=%ProgramFiles(x86)%"
+set "PF64=%ProgramFiles%"
+
 set "PYEXE="
 set "NOPAUSE=0"
 
 set "MODE=prod"
 set "MODE_EXPLICIT=0"
 set "DO_CLEAN=0"
+set "DO_INSTALLER=0"
 
 REM Parse args (order-independent)
 :parse_args
@@ -27,6 +31,8 @@ if /I "%~1"=="nopause" (
   set "NOPAUSE=1"
 ) else if /I "%~1"=="clean" (
   set "DO_CLEAN=1"
+) else if /I "%~1"=="installer" (
+  set "DO_INSTALLER=1"
 ) else if /I "%~1"=="prod" (
   set "MODE=prod"
   set "MODE_EXPLICIT=1"
@@ -42,6 +48,26 @@ shift
 goto :parse_args
 
 :args_done
+
+REM If installer requested, ensure Inno Setup compiler exists BEFORE doing long build steps.
+set "ISCC="
+if "%DO_INSTALLER%"=="1" goto :check_inno
+goto :after_inno_check
+
+:check_inno
+if defined ISCC_PATH if exist "%ISCC_PATH%" set "ISCC=%ISCC_PATH%"
+if not defined ISCC if not "%PF86%"=="" if exist "%PF86%\Inno Setup 6\ISCC.exe" set "ISCC=%PF86%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if not "%PF64%"=="" if exist "%PF64%\Inno Setup 6\ISCC.exe" set "ISCC=%PF64%\Inno Setup 6\ISCC.exe"
+if not defined ISCC goto :inno_missing
+goto :after_inno_check
+
+:inno_missing
+echo [ERROR] Inno Setup compiler (ISCC.exe) not found.
+echo         Install Inno Setup 6, or set env var ISCC_PATH to ISCC.exe
+echo         Example: setx ISCC_PATH "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+goto :fail
+
+:after_inno_check
 
 REM Prefer currently activated venv if available.
 if defined VIRTUAL_ENV if exist "%VIRTUAL_ENV%\Scripts\python.exe" set "PYEXE=%VIRTUAL_ENV%\Scripts\python.exe"
@@ -105,6 +131,12 @@ if errorlevel 1 (
   goto :fail
 )
 
+REM Read app version from configs\app.json (used for installer naming).
+set "APP_VERSION=0.0.0"
+for /f "delims=" %%V in ('"%PYEXE%" tools\print_app_version.py 2^>nul') do set "APP_VERSION=%%V"
+if not defined APP_VERSION set "APP_VERSION=0.0.0"
+echo [INFO] AppVersion: %APP_VERSION%
+
 if /I "%~1"=="clean" (
   REM legacy path: handled by DO_CLEAN now
 )
@@ -128,7 +160,7 @@ REM Common Windows failure: dist\DayzModManager.exe is locked by a running proce
 REM Try to release the lock before building.
 echo [INFO] Releasing any locked DayzModManager.exe...
 taskkill /im DayzModManager.exe /F >nul 2>nul
-if exist "dist\DayzModManager.exe" del /f /q "dist\DayzModManager.exe" >nul 2>nul
+if exist "dist\DayzModManager\DayzModManager.exe" del /f /q "dist\DayzModManager\DayzModManager.exe" >nul 2>nul
 
 set "DMM_BUILD_MODE=%MODE%"
 echo [INFO] Build mode: %DMM_BUILD_MODE%
@@ -139,6 +171,23 @@ if errorlevel 1 (
   echo [ERROR] Build failed.
   goto :fail
 )
+
+if not "%DO_INSTALLER%"=="1" goto :after_installer
+if not exist "installer.iss" (
+  echo [ERROR] installer.iss not found. Cannot build installer.
+  goto :fail
+)
+
+echo [INFO] Compiling installer with Inno Setup...
+"%ISCC%" /Qp "/DAppVersion=%APP_VERSION%" "installer.iss"
+if errorlevel 1 (
+  echo [ERROR] Installer build failed.
+  goto :fail
+)
+echo [OK] Installer compiled.
+echo      Output: %CD%\installer_output\DayzModManager_Setup_%APP_VERSION%.exe
+
+:after_installer
 
 echo [OK] Build complete.
 echo      Output: %CD%\dist\DayzModManager\DayzModManager.exe
@@ -154,6 +203,6 @@ echo.
 echo [HINT] If you double-clicked this file, run it from a terminal to see output:
 echo        cd /d "%CD%" ^&^& build.bat
 echo.
-pause
+if "%NOPAUSE%"=="0" pause
 endlocal
 exit /b 1

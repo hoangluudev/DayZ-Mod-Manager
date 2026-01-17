@@ -1,5 +1,6 @@
 Param(
-  [switch]$Clean
+  [switch]$Clean,
+  [switch]$Installer
 )
 
 Set-StrictMode -Version Latest
@@ -65,7 +66,7 @@ try {
   # ignore
 }
 
-$distExe = Join-Path $Root 'dist\DayzModManager.exe'
+$distExe = Join-Path $Root 'dist\DayzModManager\DayzModManager.exe'
 if (Test-Path $distExe) {
   try {
     Remove-Item -Force $distExe -ErrorAction Stop
@@ -82,3 +83,41 @@ Write-Host '[INFO] Building EXE with PyInstaller spec...'
 
 Write-Host '[OK] Build complete.'
 Write-Host ("      Output: {0}" -f (Join-Path $Root 'dist\DayzModManager\DayzModManager.exe'))
+
+if ($Installer) {
+  $iss = Join-Path $Root 'installer.iss'
+  if (-not (Test-Path $iss)) {
+    Write-Host '[WARN] installer.iss not found. Skipping installer build.'
+    return
+  }
+
+  $isccCandidates = @()
+  if ($env:ISCC_PATH) { $isccCandidates += $env:ISCC_PATH }
+  if ($env:ProgramFiles -and (Test-Path (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'))) {
+    $isccCandidates += (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+  }
+  if ($env:'ProgramFiles(x86)' -and (Test-Path (Join-Path $env:'ProgramFiles(x86)' 'Inno Setup 6\ISCC.exe'))) {
+    $isccCandidates += (Join-Path $env:'ProgramFiles(x86)' 'Inno Setup 6\ISCC.exe')
+  }
+
+  $iscc = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  if (-not $iscc) {
+    Write-Host '[WARN] Inno Setup compiler (ISCC.exe) not found. Set ISCC_PATH or install Inno Setup 6.'
+    return
+  }
+
+  $appJson = Join-Path $Root 'configs\app.json'
+  $appVersion = '0.0.0'
+  try {
+    $cfg = Get-Content -Raw -Path $appJson -Encoding UTF8 | ConvertFrom-Json
+    if ($cfg.version) { $appVersion = [string]$cfg.version }
+  } catch {
+    # ignore and keep default
+  }
+
+  Write-Host '[INFO] Compiling installer with Inno Setup...'
+  & $iscc /Qp ("/DAppVersion=$appVersion") $iss
+
+  Write-Host '[OK] Installer compiled.'
+  Write-Host ("      Output: {0}" -f (Join-Path $Root ("installer_output\\DayzModManager_Setup_{0}.exe" -f $appVersion)))
+}

@@ -602,7 +602,7 @@ def _create_default_theme() -> ThemePack:
     return ThemePack(
         id="default",
         name="Default",
-        description="Dark theme with green accent - inspired by CurseForge",
+        description="Dark theme with green accent",
         colors=ThemeColors(
             # Base dark colors
             background="#1e1e1e",

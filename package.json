@@ -8,6 +8,7 @@
     "dev": "cmd /c set DAYZMM_ENV=dev && python main.py",
     "build:prod": "cmd /c build.bat prod nopause",
     "build:dev": "cmd /c build.bat dev nopause",
+    "build:installer": "cmd /c build.bat prod installer nopause",
     "clean": "cmd /c build.bat clean nopause",
     "lint": "cmd /c ruff check .",
     "format": "cmd /c black .",
