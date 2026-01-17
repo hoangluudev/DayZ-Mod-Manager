@@ -327,7 +327,7 @@ class UnifiedConfigTab(QWidget):
             ("config.section.security", ["verifySignatures", "forceSameBuild", "enableWhitelist"]),
             ("config.section.gameplay", ["disableVoN", "vonCodecQuality", "disable3rdPerson", "disableCrosshair", "disableRespawnDialog", "respawnTime"]),
             ("config.section.time", ["serverTime", "serverTimeAcceleration", "serverNightTimeAcceleration", "serverTimePersistent"]),
-            ("config.section.performance", ["guaranteedUpdates", "loginQueueConcurrentPlayers", "loginQueueMaxPlayers"]),
+            ("config.section.performance", ["guaranteedUpdates", "steamProtocolMaxDataSize", "loginQueueConcurrentPlayers", "loginQueueMaxPlayers"]),
             ("config.section.storage", ["storeHouseStateDisabled", "storageAutoFix", "disableBaseDamage", "disableContainerDamage"]),
         ]
         
@@ -809,6 +809,9 @@ class UnifiedConfigTab(QWidget):
             
             # Mark as saved
             self.change_manager.mark_saved()
+            
+            # Reload server config to reflect saved changes
+            self._load_server_config(str(server_path))
             
             QMessageBox.information(self, tr("common.success"), tr("config.all_saved"))
             self.config_saved.emit()

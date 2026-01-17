@@ -73,6 +73,9 @@ CONFIG_FIELDS: dict[str, ConfigFieldDef] = {
     "guaranteedUpdates": ConfigFieldDef(
         "bool", True, "config.tooltip.guaranteed_updates"
     ),
+    "steamProtocolMaxDataSize": ConfigFieldDef(
+        "int", 8192, "config.tooltip.steam_protocol_max_data_size", 0, 65536
+    ),
     "loginQueueConcurrentPlayers": ConfigFieldDef(
         "int", 5, "config.tooltip.login_queue", 1, 25
     ),

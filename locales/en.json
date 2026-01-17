@@ -263,6 +263,7 @@
             "night_accel": "Night time acceleration multiplier (0-64)",
             "time_persistent": "Persist time across server restarts",
             "guaranteed_updates": "Guaranteed network updates",
+            "steam_protocol_max_data_size": "Maximum data size for Steam protocol (increase to avoid 'too many mods' error)",
             "login_queue": "Concurrent players in login queue",
             "login_queue_max": "Maximum login queue size",
             "instance_id": "Server instance ID for storage",

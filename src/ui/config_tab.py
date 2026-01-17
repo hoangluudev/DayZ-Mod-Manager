@@ -110,6 +110,13 @@ CONFIG_FIELDS = {
         "default": True,
         "tooltip": "config.tooltip.guaranteed_updates"
     },
+    "steamProtocolMaxDataSize": {
+        "type": "int",
+        "default": 8192,
+        "min": 0,
+        "max": 65536,
+        "tooltip": "config.tooltip.steam_protocol_max_data_size"
+    },
     "loginQueueConcurrentPlayers": {
         "type": "int",
         "default": 5,
@@ -340,6 +347,7 @@ class ConfigTab(QWidget):
         perf_box = QGroupBox(tr("config.section.performance"))
         perf_form = QFormLayout(perf_box)
         self._add_field(perf_form, "guaranteedUpdates")
+        self._add_field(perf_form, "steamProtocolMaxDataSize")
         self._add_field(perf_form, "loginQueueConcurrentPlayers")
         self._add_field(perf_form, "loginQueueMaxPlayers")
         content_layout.addWidget(perf_box)
@@ -560,6 +568,8 @@ class ConfigTab(QWidget):
             save_path.write_text(content, encoding="utf-8")
             self.cfg_path = save_path
             self.lbl_current_file.setText(str(save_path))
+            # Reload config from file to refresh UI
+            self._load_cfg_file(save_path)
             QMessageBox.information(self, tr("common.success"), tr("config.saved"))
         except Exception as e:
             QMessageBox.critical(self, tr("common.error"), str(e))

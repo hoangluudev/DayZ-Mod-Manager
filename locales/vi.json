@@ -267,6 +267,7 @@
             "night_accel": "Hệ số tăng tốc thời gian ban đêm (0-64)",
             "time_persistent": "Duy trì thời gian qua các lần khởi động",
             "guaranteed_updates": "Cập nhật mạng đảm bảo",
+            "steam_protocol_max_data_size": "Kích thước dữ liệu tối đa cho giao thức Steam (tăng để tránh lỗi 'too many mods')",
             "login_queue": "Số người chơi đồng thời trong hàng đợi",
             "login_queue_max": "Kích thước hàng đợi tối đa",
             "instance_id": "ID instance server cho lưu trữ",
