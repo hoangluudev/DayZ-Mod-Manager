@@ -359,6 +359,7 @@
         "confirm_exit": "Bạn có chắc muốn thoát không?",
         "unsaved_changes": "Bạn có thay đổi chưa lưu. Bạn có muốn lưu trước khi đóng không?",
         "server_running": "Server vẫn đang chạy. Dừng server trước khi thoát?",
+        "server_running_save_blocked": "DayZ server đang chạy. Vui lòng dừng server trước khi lưu thay đổi.",
         "confirm_restore_app_defaults": "Khôi phục cài đặt ứng dụng về mặc định?",
         "select_server_folder_for_restore": "Chọn thư mục DayZ Server để khôi phục mặc định",
         "confirm_restore_server_defaults": "Thao tác này sẽ ghi đè start.bat và serverDZ.cfg trong thư mục server đã chọn. Tiếp tục?"

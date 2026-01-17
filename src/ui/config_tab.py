@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QPoint
 from src.ui.widgets import IconButton
 from src.ui.theme_manager import ThemeManager
 from src.utils.locale_manager import tr
+from src.core.process_utils import is_dayz_server_running
 
 
 # Configuration field definitions with tooltips
@@ -549,6 +550,10 @@ class ConfigTab(QWidget):
             return
         
         save_path = server_path / "serverDZ.cfg"
+
+        if is_dayz_server_running():
+            QMessageBox.warning(self, tr("common.warning"), tr("dialogs.server_running_save_blocked"))
+            return
         
         try:
             content = self._generate_cfg_content()

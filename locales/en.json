@@ -359,6 +359,7 @@
         "confirm_exit": "Are you sure you want to exit?",
         "unsaved_changes": "You have unsaved changes. Do you want to save before closing?",
         "server_running": "Server is still running. Stop it before exiting?",
+        "server_running_save_blocked": "DayZ server is running. Please stop the server before saving changes.",
         "confirm_restore_app_defaults": "Restore application settings to defaults?",
         "select_server_folder_for_restore": "Select DayZ Server folder to restore defaults",
         "confirm_restore_server_defaults": "This will overwrite start.bat and serverDZ.cfg in the selected server folder. Continue?"

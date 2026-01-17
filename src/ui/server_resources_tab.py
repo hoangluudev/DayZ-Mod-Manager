@@ -25,6 +25,7 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QKeySequence, QShortcut, QTextDocument, QTextCursor
 
 from src.utils.locale_manager import tr
+from src.core.process_utils import is_dayz_server_running
 from src.ui.icons import Icons
 from src.ui.theme_manager import ThemeManager
 from src.ui.widgets import IconButton
@@ -366,6 +367,9 @@ class FileEditorDialog(QDialog):
     def _save_and_close(self):
         """Save file and close dialog."""
         try:
+            if self.file_path.name.lower() == "serverdz.cfg" and is_dayz_server_running():
+                QMessageBox.warning(self, tr("common.warning"), tr("dialogs.server_running_save_blocked"))
+                return
             content = self.editor.toPlainText()
 
             if content == self.original_content:

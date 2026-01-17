@@ -29,6 +29,7 @@ from src.constants.config import (
     CONFIG_FIELDS, ConfigFieldDef, AVAILABLE_MAPS, 
     LAUNCHER_DEFAULTS, get_mod_priority
 )
+from src.core.process_utils import is_dayz_server_running
 
 
 class UnifiedConfigTab(QWidget):
@@ -763,6 +764,10 @@ class UnifiedConfigTab(QWidget):
         server_path = Path(self.current_profile.get("server_path", ""))
         if not server_path.exists():
             QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+
+        if is_dayz_server_running():
+            QMessageBox.warning(self, tr("common.warning"), tr("dialogs.server_running_save_blocked"))
             return
         
         try:
