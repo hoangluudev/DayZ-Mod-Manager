@@ -71,31 +71,22 @@ def get_default_storage_path() -> Path:
     """
     Get the default storage path based on environment.
     
-    Production (frozen/built):
-        - Primary: C:\\ProgramData\\DayZModManager
-        - Fallback: App folder if ProgramData not writable
-    
-    Development (script):
-        - Always use project folder for easy debugging
+    All modes:
+        - Use per-user writable storage under %APPDATA% (Roaming)
+        - This avoids writing into Program Files or other protected folders
     """
-    if is_frozen():
-        # Production: Use ProgramData
-        program_data = os.environ.get('PROGRAMDATA', 'C:\\ProgramData')
-        storage_path = Path(program_data) / get_app_name()
-        
-        # Try to create and verify write access
-        try:
-            storage_path.mkdir(parents=True, exist_ok=True)
-            test_file = storage_path / ".write_test"
-            test_file.touch()
-            test_file.unlink()
-            return storage_path
-        except (PermissionError, OSError):
-            # Fallback to app folder
-            return get_base_path()
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        base = Path(appdata)
     else:
-        # Development: Use project folder
-        return get_base_path()
+        # Fallback for environments where APPDATA isn't set
+        base = Path.home() / 'AppData' / 'Roaming'
+    storage_path = base / get_app_name()
+    try:
+        storage_path.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as e:
+        print(f"Warning: Could not create APPDATA storage directory at {storage_path}: {e}")
+    return storage_path
 
 
 def get_configs_path(custom_path: Optional[str] = None) -> Path:
@@ -152,10 +143,12 @@ def get_app_config_file_path() -> Path:
     """
     Get the path for the app.json config file.
     
+    Always use the bundled/resource config - this is read-only app metadata.
+    
     Returns:
-        Path to app.json
+        Path to app.json in resource directory
     """
-    return get_configs_path() / "app.json"
+    return get_resource_base_path() / "configs" / "app.json"
 
 
 def get_defaults_path() -> Path:
@@ -230,12 +223,21 @@ def bootstrap_first_run() -> None:
 
     This is especially important for frozen builds where the bundled configs/locales
     live under sys._MEIPASS (read-only) and user-writable configs must be created
-    under ProgramData (or the chosen storage folder).
+    under %APPDATA%.
     """
     ensure_storage_structure()
 
     configs_dir = get_configs_path()
     bundled_configs = get_resource_configs_path()
+
+    # app.json is resource-only. If an older version wrote it into user storage,
+    # remove it to avoid confusion.
+    try:
+        stale_app_json = configs_dir / "app.json"
+        if stale_app_json.exists():
+            stale_app_json.unlink()
+    except Exception as e:
+        print(f"Warning: Could not remove stale app.json: {e}")
 
     # settings.json
     settings_dst = configs_dir / "settings.json"
@@ -255,23 +257,8 @@ def bootstrap_first_run() -> None:
         except Exception as e:
             print(f"Warning: Could not bootstrap settings.json: {e}")
 
-    # app.json
-    app_dst = configs_dir / "app.json"
-    if not app_dst.exists():
-        app_src = bundled_configs / "app.json"
-        try:
-            if app_src.exists():
-                shutil.copyfile(app_src, app_dst)
-            else:
-                from dataclasses import asdict
-                from src.core.app_config import AppConfig
-
-                app_dst.write_text(
-                    json.dumps(asdict(AppConfig()), indent=2) + "\n",
-                    encoding="utf-8",
-                )
-        except Exception as e:
-            print(f"Warning: Could not bootstrap app.json: {e}")
+    # NOTE: app.json is app metadata and must remain read-only.
+    # It is bundled with the application and should never be copied into user storage.
 
 
 def get_storage_info() -> dict:

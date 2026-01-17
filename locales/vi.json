@@ -50,7 +50,12 @@
         "mods": "Mod",
         "launcher": "Khởi chạy",
         "config": "Cấu hình",
-        "settings": "Cài đặt"
+        "settings": "Cài đặt",
+        "profiles_tooltip": "Quản lý hồ sơ server",
+        "mods_tooltip": "Cài đặt và quản lý mod",
+        "launcher_tooltip": "Cấu hình khởi chạy server",
+        "config_tooltip": "Sửa cấu hình server",
+        "settings_tooltip": "Cài đặt ứng dụng"
     },
     "profiles": {
         "title": "Hồ Sơ Server",

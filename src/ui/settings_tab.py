@@ -38,7 +38,7 @@ class AppearanceTab(BaseSubTab):
     def _setup_content(self):
         
         # Language Section
-        lang_box = SectionBox(tr("settings.language"))
+        self.lang_box = SectionBox(tr("settings.language"))
         lang_form = QFormLayout()
         lang_form.setSpacing(12)
         
@@ -52,11 +52,11 @@ class AppearanceTab(BaseSubTab):
         self.lbl_lang_desc.setStyleSheet("color: gray; font-size: 11px;")
         lang_form.addRow("", self.lbl_lang_desc)
         
-        lang_box.add_layout(lang_form)
-        self.add_widget(lang_box)
+        self.lang_box.add_layout(lang_form)
+        self.add_widget(self.lang_box)
         
         # Theme Section - CurseForge-style theme cards
-        theme_box = SectionBox(tr("settings.theme"))
+        self.theme_box = SectionBox(tr("settings.theme"))
         theme_layout = QVBoxLayout()
         theme_layout.setSpacing(10)
 
@@ -77,8 +77,8 @@ class AppearanceTab(BaseSubTab):
         self.theme_scroll.setWidget(self.theme_grid_host)
         theme_layout.addWidget(self.theme_scroll)
 
-        theme_box.add_layout(theme_layout)
-        self.add_widget(theme_box)
+        self.theme_box.add_layout(theme_layout)
+        self.add_widget(self.theme_box)
         
         self.add_stretch()
 
@@ -250,7 +250,9 @@ class AppearanceTab(BaseSubTab):
     
     def update_texts(self):
         """Update UI texts."""
+        self.lang_box.setTitle(tr("settings.language"))
         self.lbl_lang_desc.setText(tr("settings.language_desc"))
+        self.theme_box.setTitle(tr("settings.theme"))
         self.lbl_theme_desc.setText(tr("settings.theme_desc"))
         # Rebuild cards so any translated strings (if added later) refresh.
         try:
@@ -283,7 +285,7 @@ class ConfigTab(BaseSubTab):
             get_app_config_file_path = None  # type: ignore
 
         if get_settings_file_path and get_app_config_file_path:
-            files_box = SectionBox(tr("settings.config_files"))
+            self.files_box = SectionBox(tr("settings.config_files"))
             files_layout = QVBoxLayout()
             files_layout.setSpacing(10)
 
@@ -304,11 +306,11 @@ class ConfigTab(BaseSubTab):
             btn_open.clicked.connect(lambda: self._open_configs_folder(get_configs_path() if get_configs_path else None))
             files_layout.addWidget(btn_open, alignment=Qt.AlignLeft)
 
-            files_box.add_layout(files_layout)
-            self.add_widget(files_box)
+            self.files_box.add_layout(files_layout)
+            self.add_widget(self.files_box)
         
         # Default Paths Section
-        paths_box = SectionBox(tr("settings.default_paths"))
+        self.paths_box = SectionBox(tr("settings.default_paths"))
         paths_form = QFormLayout()
         paths_form.setSpacing(12)
         
@@ -326,11 +328,11 @@ class ConfigTab(BaseSubTab):
         self.path_server.path_changed.connect(self._on_server_changed)
         paths_form.addRow(tr("settings.default_server") + ":", self.path_server)
         
-        paths_box.add_layout(paths_form)
-        self.add_widget(paths_box)
+        self.paths_box.add_layout(paths_form)
+        self.add_widget(self.paths_box)
         
         # Data Storage Section
-        storage_box = SectionBox(tr("settings.data_storage"))
+        self.storage_box = SectionBox(tr("settings.data_storage"))
         storage_layout = QVBoxLayout()
         storage_layout.setSpacing(12)
         
@@ -362,11 +364,11 @@ class ConfigTab(BaseSubTab):
         self.lbl_storage_note.setWordWrap(True)
         storage_layout.addWidget(self.lbl_storage_note)
         
-        storage_box.add_layout(storage_layout)
-        self.add_widget(storage_box)
+        self.storage_box.add_layout(storage_layout)
+        self.add_widget(self.storage_box)
         
         # Restore Defaults Section
-        restore_box = SectionBox(tr("settings.restore_section"))
+        self.restore_box = SectionBox(tr("settings.restore_section"))
         restore_layout = QVBoxLayout()
         restore_layout.setSpacing(12)
         
@@ -385,8 +387,8 @@ class ConfigTab(BaseSubTab):
         btn_layout.addStretch()
         restore_layout.addLayout(btn_layout)
         
-        restore_box.add_layout(restore_layout)
-        self.add_widget(restore_box)
+        self.restore_box.add_layout(restore_layout)
+        self.add_widget(self.restore_box)
         
         self.add_stretch()
 
@@ -466,6 +468,11 @@ class ConfigTab(BaseSubTab):
     
     def update_texts(self):
         """Update UI texts."""
+        if hasattr(self, 'files_box'):
+            self.files_box.setTitle(tr("settings.config_files"))
+        self.paths_box.setTitle(tr("settings.default_paths"))
+        self.storage_box.setTitle(tr("settings.data_storage"))
+        self.restore_box.setTitle(tr("settings.restore_section"))
         self.lbl_storage_note.setText(tr("settings.storage_note"))
         self.lbl_restore_desc.setText(tr("settings.restore_desc"))
         self.chk_custom_storage.setText(tr("settings.use_custom_storage"))
@@ -483,7 +490,7 @@ class BehaviorTab(BaseSubTab):
     def _setup_content(self):
         
         # Behavior Section
-        behavior_box = SectionBox(tr("settings.behavior"))
+        self.behavior_box = SectionBox(tr("settings.behavior"))
         behavior_layout = QVBoxLayout()
         behavior_layout.setSpacing(12)
         
@@ -499,8 +506,8 @@ class BehaviorTab(BaseSubTab):
         self.chk_copy_bikeys.stateChanged.connect(self._on_setting_changed)
         behavior_layout.addWidget(self.chk_copy_bikeys)
         
-        behavior_box.add_layout(behavior_layout)
-        self.add_widget(behavior_box)
+        self.behavior_box.add_layout(behavior_layout)
+        self.add_widget(self.behavior_box)
         
         self.add_stretch()
     
@@ -519,6 +526,7 @@ class BehaviorTab(BaseSubTab):
     
     def update_texts(self):
         """Update UI texts."""
+        self.behavior_box.setTitle(tr("settings.behavior"))
         self.chk_auto_backup.setText(tr("settings.auto_backup"))
         self.chk_confirm_actions.setText(tr("settings.confirm_actions"))
         self.chk_copy_bikeys.setText(tr("settings.auto_copy_bikeys"))
@@ -535,7 +543,7 @@ class AboutTab(BaseSubTab):
     def _setup_content(self):
         
         # About Section
-        about_box = SectionBox(tr("settings.about"))
+        self.about_box = SectionBox(tr("settings.about"))
         about_layout = QVBoxLayout()
         about_layout.setSpacing(12)
         
@@ -562,13 +570,14 @@ class AboutTab(BaseSubTab):
         desc_label.setStyleSheet("margin-top: 16px;")
         about_layout.addWidget(desc_label)
         
-        about_box.add_layout(about_layout)
-        self.add_widget(about_box)
+        self.about_box.add_layout(about_layout)
+        self.add_widget(self.about_box)
         
         self.add_stretch()
     
     def update_texts(self):
         """Update UI texts."""
+        self.about_box.setTitle(tr("settings.about"))
         # Texts are static, but the logo may change with theme.
         try:
             self.logo_label.setPixmap(Icons.get_app_logo_pixmap(size=96, variant="auto"))

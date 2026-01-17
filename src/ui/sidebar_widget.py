@@ -296,7 +296,7 @@ class SidebarWidget(QWidget):
         self.footer.setFixedHeight(max(12, int(self.footer.sizeHint().height())))
         layout.addWidget(self.footer)
     
-    def add_item(self, icon_name: str, text: str):
+    def add_item(self, icon_name: str, text: str, tooltip: str = ""):
         """Add a navigation item with SVG icon."""
         item = QListWidgetItem(text)
         # Keep the original item height for menu items
@@ -315,12 +315,14 @@ class SidebarWidget(QWidget):
 
         # If collapsed, keep new items icon-only too.
         if self._collapsed:
-            item.setToolTip(text)
+            item.setToolTip(tooltip or text)
             item.setText("")
             item.setTextAlignment(Qt.AlignCenter)
             # Use full-width rows in collapsed mode so icon can be centered perfectly.
             item.setSizeHint(QSize(max(0, self.nav_list.viewport().width()), self._collapsed_item_h))
             item.setIcon(Icons.get_icon(icon_name, size=SidebarDimensions.COLLAPSED_ICON_SIZE))
+        else:
+            item.setToolTip(tooltip)
     
     def set_current_index(self, index: int):
         """Set the current selected index."""
@@ -330,18 +332,18 @@ class SidebarWidget(QWidget):
         """Get current selected index."""
         return self.nav_list.currentRow()
     
-    def update_item_text(self, index: int, icon_name: str, text: str):
+    def update_item_text(self, index: int, icon_name: str, text: str, tooltip: str = ""):
         """Update text and icon of an item at index."""
         item = self.nav_list.item(index)
         if item:
             if self._collapsed:
-                item.setToolTip(text)
+                item.setToolTip(tooltip or text)
                 item.setText("")
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setSizeHint(QSize(max(0, self.nav_list.viewport().width()), self._collapsed_item_h))
                 item.setIcon(Icons.get_icon(icon_name, size=SidebarDimensions.COLLAPSED_ICON_SIZE))
             else:
-                item.setToolTip("")
+                item.setToolTip(tooltip)
                 item.setText(text)
                 item.setTextAlignment(Qt.AlignVCenter)
                 item.setSizeHint(QSize(0, SidebarDimensions.ITEM_HEIGHT))

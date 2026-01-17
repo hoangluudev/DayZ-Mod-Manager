@@ -152,7 +152,7 @@ class MainWindow(QMainWindow):
         
         # Add navigation items from centralized constants
         for nav_item in SIDEBAR_ITEMS:
-            self.sidebar.add_item(nav_item.icon_name, tr(nav_item.translation_key))
+            self.sidebar.add_item(nav_item.icon_name, tr(nav_item.translation_key), tr(nav_item.tooltip_key) if nav_item.tooltip_key else "")
         
         self.sidebar.set_current_index(0)
         self.sidebar.item_selected.connect(self._on_sidebar_item_selected)
@@ -291,14 +291,15 @@ class MainWindow(QMainWindow):
     def _update_texts(self):
         """Update all UI texts with current language."""
         # Window title
-        self.setWindowTitle(f"{tr('app.title')} v{get_version()}")
+        self.setWindowTitle(f"{get_app_name()} v{get_version()}")
         
         # Sidebar items from centralized constants
         for nav_item in SIDEBAR_ITEMS:
             self.sidebar.update_item_text(
                 nav_item.index,
                 nav_item.icon_name,
-                tr(nav_item.translation_key)
+                tr(nav_item.translation_key),
+                tr(nav_item.tooltip_key) if nav_item.tooltip_key else ""
             )
         
         # Menus

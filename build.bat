@@ -98,6 +98,13 @@ if errorlevel 1 (
   goto :fail
 )
 
+echo [INFO] Embedding configs\app.json into the executable...
+"%PYEXE%" tools\embed_app_config.py
+if errorlevel 1 (
+  echo [ERROR] Failed to embed app config.
+  goto :fail
+)
+
 if /I "%~1"=="clean" (
   REM legacy path: handled by DO_CLEAN now
 )

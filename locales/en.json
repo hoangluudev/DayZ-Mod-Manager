@@ -50,7 +50,12 @@
         "mods": "Mods",
         "launcher": "Launcher",
         "config": "Configuration",
-        "settings": "Settings"
+        "settings": "Settings",
+        "profiles_tooltip": "Manage server profiles",
+        "mods_tooltip": "Install and manage mods",
+        "launcher_tooltip": "Configure server launcher",
+        "config_tooltip": "Edit server configuration",
+        "settings_tooltip": "Application settings"
     },
     "profiles": {
         "title": "Server Profiles",

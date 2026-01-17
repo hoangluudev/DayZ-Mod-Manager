@@ -17,20 +17,18 @@ def main():
     # Example: Update version
     new_version = input("Enter new version (current: {}): ".format(config.version))
     if new_version and new_version != config.version:
-        config.set_version(new_version)
-        print(f"Version updated to: {new_version}")
+        print(f"To update version to {new_version}, manually edit configs/app.json")
     else:
         print("Version not changed")
 
     # Example: Update author
     new_author = input("Enter new author (current: {}): ".format(config.author))
     if new_author and new_author != config.author:
-        config.set_author(new_author)
-        print(f"Author updated to: {new_author}")
+        print(f"To update author to {new_author}, manually edit configs/app.json")
     else:
         print("Author not changed")
 
-    print("\nAll changes saved to configs/app.json")
+    print("\nApp config is read-only. Edit configs/app.json manually to make changes.")
 
 if __name__ == "__main__":
     main()

@@ -47,6 +47,9 @@ try {
 Write-Host '[INFO] Generating app_icon.ico from logo...'
 & $py (Join-Path $Root 'tools\generate_icons.py') --input (Join-Path $Root 'assets\icons\new_logo.png') --output (Join-Path $Root 'assets\icons\app_icon.ico')
 
+Write-Host '[INFO] Embedding configs\app.json into the executable...'
+& $py (Join-Path $Root 'tools\embed_app_config.py')
+
 if ($Clean) {
   Write-Host '[INFO] Cleaning build artifacts...'
   if (Test-Path 'build') { Remove-Item -Recurse -Force 'build' }
@@ -78,4 +81,4 @@ Write-Host '[INFO] Building EXE with PyInstaller spec...'
 & $py -m PyInstaller --noconfirm --clean 'DayzModManager.spec'
 
 Write-Host '[OK] Build complete.'
-Write-Host ("      Output: {0}" -f (Join-Path $Root 'dist\DayzModManager.exe'))
+Write-Host ("      Output: {0}" -f (Join-Path $Root 'dist\DayzModManager\DayzModManager.exe'))
