@@ -120,8 +120,9 @@ class UnifiedConfigTab(QWidget):
         self.tab_server_config = self._create_server_config_tab()
 
         # Embedded resource browsers
-        self.tab_map_resources = ResourcesBrowserWidget()
-        self.tab_mods_resources = ResourcesBrowserWidget()
+        # NOTE: presets are stored separately per-scope to avoid overwriting between tabs.
+        self.tab_map_resources = ResourcesBrowserWidget(preset_scope="map")
+        self.tab_mods_resources = ResourcesBrowserWidget(preset_scope="mods")
         
         self.tabs.addTab(self.tab_launcher, tr("config.tab_launcher"))
         self.tabs.addTab(self.tab_server_config, tr("config.tab_server"))
@@ -478,6 +479,10 @@ class UnifiedConfigTab(QWidget):
         
         server_path = profile_data.get("server_path", "")
         self.txt_server_location.setText(server_path)
+        
+        # Set profile for resource browsers (for preset management)
+        self.tab_map_resources.set_profile(profile_data)
+        self.tab_mods_resources.set_profile(profile_data)
         
         # Load configurations
         self._load_launcher_config(server_path)

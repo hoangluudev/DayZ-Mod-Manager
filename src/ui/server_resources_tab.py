@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QTextEdit, QMessageBox, QFileDialog, QComboBox, QScrollArea,
     QFrame, QTabWidget, QSplitter, QListWidget, QListWidgetItem,
     QTreeWidget, QTreeWidgetItem, QAbstractItemView, QDialog,
-    QDialogButtonBox, QPlainTextEdit, QMenu, QInputDialog
+    QDialogButtonBox, QPlainTextEdit, QMenu, QInputDialog,
+    QApplication, QProgressDialog
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QKeySequence, QShortcut, QTextDocument, QTextCursor
@@ -472,7 +473,7 @@ class FileEditorDialog(QDialog):
         if not found:
             # Wrap-around
             cursor = self.editor.textCursor()
-            cursor.movePosition(cursor.Start)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.editor.setTextCursor(cursor)
             found = self.editor.find(text, self._find_flags(backwards=False))
 
@@ -489,7 +490,7 @@ class FileEditorDialog(QDialog):
         if not found:
             # Wrap-around
             cursor = self.editor.textCursor()
-            cursor.movePosition(cursor.End)
+            cursor.movePosition(QTextCursor.MoveOperation.End)
             self.editor.setTextCursor(cursor)
             found = self.editor.find(text, self._find_flags(backwards=True))
 
@@ -607,11 +608,23 @@ class ResourcesBrowserWidget(QWidget):
 
     resources_changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, preset_scope: str = "mods"):
         super().__init__(parent)
         self._root_path: Optional[Path] = None
+        self._profile_data: Optional[Dict] = None
+        self._preset_manager = None
+        self._preset_scope = preset_scope
 
         self._setup_ui()
+    
+    def set_profile(self, profile_data: dict):
+        """Set the current profile for preset management."""
+        self._profile_data = profile_data
+        if profile_data:
+            from src.core.config_preset_manager import ConfigPresetManager
+            self._preset_manager = ConfigPresetManager(profile_data, scope=self._preset_scope)
+        else:
+            self._preset_manager = None
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -625,6 +638,27 @@ class ResourcesBrowserWidget(QWidget):
         )
         header.addWidget(self.lbl_root)
         header.addStretch()
+        
+        # === Config Presets buttons (for all configs) ===
+        self.btn_save_all_default = IconButton("save", tr("presets.save_as_default"), size=14)
+        self.btn_save_all_default.setToolTip(tr("presets.save_all_as_default_tooltip"))
+        self.btn_save_all_default.clicked.connect(self._save_all_as_default)
+        header.addWidget(self.btn_save_all_default)
+        
+        self.btn_save_all_preset = IconButton("bookmark", tr("presets.save_config_presets"), size=14)
+        self.btn_save_all_preset.setToolTip(tr("presets.save_all_preset_tooltip"))
+        self.btn_save_all_preset.clicked.connect(self._save_all_preset)
+        header.addWidget(self.btn_save_all_preset)
+        
+        self.btn_load_all_preset = IconButton("download", tr("presets.load_config_presets"), size=14)
+        self.btn_load_all_preset.setToolTip(tr("presets.load_all_preset_tooltip"))
+        self.btn_load_all_preset.clicked.connect(self._load_all_preset)
+        header.addWidget(self.btn_load_all_preset)
+        
+        self.btn_restore_all_default = IconButton("undo", tr("presets.restore_default"), size=14)
+        self.btn_restore_all_default.setToolTip(tr("presets.restore_all_default_tooltip"))
+        self.btn_restore_all_default.clicked.connect(self._restore_all_default)
+        header.addWidget(self.btn_restore_all_default)
 
         self.btn_refresh = IconButton("refresh", tr("common.refresh"), size=14)
         self.btn_refresh.clicked.connect(self.refresh)
@@ -675,7 +709,38 @@ class ResourcesBrowserWidget(QWidget):
         self.lbl_preview = QLabel(tr("resources.preview"))
         self.lbl_preview.setStyleSheet("font-weight: bold;")
         preview_header.addWidget(self.lbl_preview)
+        
+        # Preset indicator for selected file
+        self.lbl_preset_indicator = QLabel()
+        self.lbl_preset_indicator.setStyleSheet("color: #4caf50; font-size: 11px;")
+        preview_header.addWidget(self.lbl_preset_indicator)
+        
         preview_header.addStretch()
+        
+        # === File-specific preset buttons ===
+        self.btn_file_save_default = IconButton("save", "", size=14, icon_only=True)
+        self.btn_file_save_default.setToolTip(tr("presets.save_as_default"))
+        self.btn_file_save_default.clicked.connect(self._save_file_as_default)
+        self.btn_file_save_default.setEnabled(False)
+        preview_header.addWidget(self.btn_file_save_default)
+        
+        self.btn_file_save_preset = IconButton("bookmark", "", size=14, icon_only=True)
+        self.btn_file_save_preset.setToolTip(tr("presets.save_preset"))
+        self.btn_file_save_preset.clicked.connect(self._save_file_preset)
+        self.btn_file_save_preset.setEnabled(False)
+        preview_header.addWidget(self.btn_file_save_preset)
+        
+        self.btn_file_load_preset = IconButton("download", "", size=14, icon_only=True)
+        self.btn_file_load_preset.setToolTip(tr("presets.load_preset"))
+        self.btn_file_load_preset.clicked.connect(self._load_file_preset)
+        self.btn_file_load_preset.setEnabled(False)
+        preview_header.addWidget(self.btn_file_load_preset)
+        
+        self.btn_file_restore_default = IconButton("undo", "", size=14, icon_only=True)
+        self.btn_file_restore_default.setToolTip(tr("presets.restore_default"))
+        self.btn_file_restore_default.clicked.connect(self._restore_file_default)
+        self.btn_file_restore_default.setEnabled(False)
+        preview_header.addWidget(self.btn_file_restore_default)
 
         self.btn_edit = IconButton("edit", tr("common.edit"), size=14)
         self.btn_edit.clicked.connect(self._edit_selected)
@@ -705,6 +770,21 @@ class ResourcesBrowserWidget(QWidget):
         self.tree.setHeaderLabels([tr("resources.name"), tr("resources.size"), tr("resources.modified")])
         self.lbl_preview.setText(tr("resources.preview"))
         self.btn_edit.setText(tr("common.edit"))
+        
+        # Update preset button texts and tooltips
+        self.btn_save_all_default.setText(tr("presets.save_as_default"))
+        self.btn_save_all_default.setToolTip(tr("presets.save_all_as_default_tooltip"))
+        self.btn_save_all_preset.setText(tr("presets.save_config_presets"))
+        self.btn_save_all_preset.setToolTip(tr("presets.save_all_preset_tooltip"))
+        self.btn_load_all_preset.setText(tr("presets.load_config_presets"))
+        self.btn_load_all_preset.setToolTip(tr("presets.load_all_preset_tooltip"))
+        self.btn_restore_all_default.setText(tr("presets.restore_default"))
+        self.btn_restore_all_default.setToolTip(tr("presets.restore_all_default_tooltip"))
+        
+        self.btn_file_save_default.setToolTip(tr("presets.save_as_default"))
+        self.btn_file_save_preset.setToolTip(tr("presets.save_preset"))
+        self.btn_file_load_preset.setToolTip(tr("presets.load_preset"))
+        self.btn_file_restore_default.setToolTip(tr("presets.restore_default"))
 
     def set_root_path(self, root_path: Optional[Path]):
         self._root_path = root_path
@@ -715,6 +795,8 @@ class ResourcesBrowserWidget(QWidget):
         self.tree.clear()
         self.txt_preview.clear()
         self.btn_edit.setEnabled(False)
+        self._set_file_preset_buttons_enabled(False)
+        self.lbl_preset_indicator.clear()
 
         if not self._root_path or not self._root_path.exists():
             self._set_enabled(False)
@@ -724,6 +806,9 @@ class ResourcesBrowserWidget(QWidget):
         self._populate_tree(self.tree, self._root_path)
         self.tree.expandToDepth(0)
         self._apply_filter()
+        
+        # Update preset indicators in tree
+        self._update_tree_preset_indicators()
 
     def _set_enabled(self, enabled: bool):
         self.txt_search.setEnabled(enabled)
@@ -844,17 +929,51 @@ class ResourcesBrowserWidget(QWidget):
         if not items:
             self.txt_preview.clear()
             self.btn_edit.setEnabled(False)
+            self._set_file_preset_buttons_enabled(False)
+            self.lbl_preset_indicator.clear()
             return
 
         item = items[0]
         file_path = Path(item.data(0, Qt.UserRole))
         if file_path.is_file():
             self._preview_file(file_path)
-            self.btn_edit.setEnabled(file_path.suffix.lower() in EDITABLE_EXTENSIONS)
+            is_editable = file_path.suffix.lower() in EDITABLE_EXTENSIONS
+            self.btn_edit.setEnabled(is_editable)
+            self._set_file_preset_buttons_enabled(is_editable and self._preset_manager is not None)
+            self._update_preset_indicator(file_path)
             return
 
         self.txt_preview.clear()
         self.btn_edit.setEnabled(False)
+        self._set_file_preset_buttons_enabled(False)
+        self.lbl_preset_indicator.clear()
+    
+    def _set_file_preset_buttons_enabled(self, enabled: bool):
+        """Enable/disable file-specific preset buttons."""
+        self.btn_file_save_default.setEnabled(enabled)
+        self.btn_file_save_preset.setEnabled(enabled)
+        self.btn_file_load_preset.setEnabled(enabled)
+        self.btn_file_restore_default.setEnabled(enabled)
+    
+    def _update_preset_indicator(self, file_path: Path):
+        """Update the preset indicator for the selected file."""
+        if not self._preset_manager:
+            self.lbl_preset_indicator.clear()
+            return
+        
+        has_default = self._preset_manager.has_default(file_path)
+        preset_count = self._preset_manager.get_preset_count_all_profiles(file_path)
+        
+        indicators = []
+        if has_default:
+            indicators.append(f"✓ {tr('presets.has_default')}")
+        if preset_count > 0:
+            indicators.append(f"📑 {preset_count} {tr('presets.presets')}")
+        
+        if indicators:
+            self.lbl_preset_indicator.setText(" | ".join(indicators))
+        else:
+            self.lbl_preset_indicator.clear()
 
     def _preview_file(self, file_path: Path):
         try:
@@ -920,6 +1039,29 @@ class ResourcesBrowserWidget(QWidget):
 
             action_backup = menu.addAction(Icons.get_icon("save"), tr("resources.create_backup"))
             action_backup.triggered.connect(lambda: self._create_backup(file_path))
+            
+            # Preset actions for editable files
+            if file_path.suffix.lower() in EDITABLE_EXTENSIONS and self._preset_manager:
+                menu.addSeparator()
+                
+                # Save as default
+                action_save_default = menu.addAction(Icons.get_icon("save"), tr("presets.save_as_default"))
+                action_save_default.triggered.connect(self._save_file_as_default)
+                
+                # Save preset
+                action_save_preset = menu.addAction(Icons.get_icon("bookmark"), tr("presets.save_preset"))
+                action_save_preset.triggered.connect(self._save_file_preset)
+                
+                # Load preset (if presets exist)
+                presets = self._preset_manager.get_presets(file_path)
+                if presets:
+                    action_load_preset = menu.addAction(Icons.get_icon("download"), tr("presets.load_preset"))
+                    action_load_preset.triggered.connect(self._load_file_preset)
+                
+                # Restore default (if default exists)
+                if self._preset_manager.has_default(file_path):
+                    action_restore = menu.addAction(Icons.get_icon("undo"), tr("presets.restore_default"))
+                    action_restore.triggered.connect(self._restore_file_default)
         else:
             action_open = menu.addAction(Icons.get_icon("folder"), tr("resources.open_folder"))
             action_open.triggered.connect(lambda: self._open_folder(file_path))
@@ -958,3 +1100,351 @@ class ResourcesBrowserWidget(QWidget):
             self.refresh()
         except Exception as e:
             QMessageBox.critical(self, tr("common.error"), str(e))
+
+    # ==================== Preset Operations ====================
+    
+    def _get_all_config_files(self) -> List[Path]:
+        """Get all editable config files in the tree."""
+        files = []
+        
+        def collect_files(item: QTreeWidgetItem):
+            path = Path(item.data(0, Qt.UserRole))
+            if path.is_file() and path.suffix.lower() in EDITABLE_EXTENSIONS:
+                files.append(path)
+            for i in range(item.childCount()):
+                collect_files(item.child(i))
+        
+        for i in range(self.tree.topLevelItemCount()):
+            collect_files(self.tree.topLevelItem(i))
+        
+        return files
+    
+    def _get_selected_file(self) -> Optional[Path]:
+        """Get the currently selected file."""
+        items = self.tree.selectedItems()
+        if not items:
+            return None
+        file_path = Path(items[0].data(0, Qt.UserRole))
+        if file_path.is_file():
+            return file_path
+        return None
+    
+    # --- File-specific preset operations ---
+    
+    def _save_file_as_default(self):
+        """Save current file as default."""
+        file_path = self._get_selected_file()
+        if not file_path or not self._preset_manager:
+            return
+        
+        if self._preset_manager.save_as_default(file_path):
+            QMessageBox.information(
+                self, tr("common.success"),
+                tr("presets.saved_as_default").format(file=file_path.name)
+            )
+            self._update_preset_indicator(file_path)
+            self._update_tree_preset_indicators()
+        else:
+            QMessageBox.warning(self, tr("common.error"), tr("presets.save_failed"))
+    
+    def _save_file_preset(self):
+        """Save current file as named preset."""
+        file_path = self._get_selected_file()
+        if not file_path or not self._preset_manager:
+            return
+        
+        existing_names = [p.name for p in self._preset_manager.get_presets(file_path)]
+        
+        from src.ui.dialogs.config_preset_dialog import SavePresetDialog
+        dialog = SavePresetDialog(existing_names, self)
+        if dialog.exec() == QDialog.Accepted:
+            if self._preset_manager.save_preset(file_path, dialog.preset_name, dialog.description):
+                QMessageBox.information(
+                    self, tr("common.success"),
+                    tr("presets.preset_saved").format(name=dialog.preset_name)
+                )
+                self._update_preset_indicator(file_path)
+                self._update_tree_preset_indicators()
+            else:
+                QMessageBox.warning(self, tr("common.error"), tr("presets.save_failed"))
+    
+    def _load_file_preset(self):
+        """Load a preset for current file."""
+        file_path = self._get_selected_file()
+        if not file_path or not self._preset_manager:
+            return
+
+        preset_options = self._preset_manager.get_preset_options(file_path, include_other_profiles=True)
+        if not preset_options:
+            QMessageBox.information(
+                self, tr("common.info"),
+                tr("presets.no_presets_available")
+            )
+            return
+
+        from src.ui.dialogs.config_preset_dialog import LoadPresetDialog
+
+        def content_loader(profile_name: str, preset_name: str) -> Optional[str]:
+            return self._preset_manager.read_preset_content(file_path, preset_name, source_profile=profile_name)
+
+        dialog = LoadPresetDialog(
+            preset_options=preset_options,
+            content_loader=content_loader,
+            current_profile_name=self._preset_manager.profile_name,
+            parent=self,
+        )
+        
+        # Handle delete signal
+        def on_preset_action(action: str):
+            if action.startswith("DELETE:"):
+                preset_name = action[7:]
+                self._preset_manager.delete_preset(file_path, preset_name)
+        
+        dialog.preset_selected.connect(on_preset_action)
+        
+        if dialog.exec() == QDialog.Accepted and dialog.selected_preset_name:
+            if self._preset_manager.load_preset(
+                file_path,
+                dialog.selected_preset_name,
+                source_profile=dialog.selected_profile_name,
+            ):
+                QMessageBox.information(
+                    self, tr("common.success"),
+                    tr("presets.preset_loaded").format(name=dialog.selected_preset_name)
+                )
+                self._on_selection_changed()  # Refresh preview
+                self.resources_changed.emit()
+            else:
+                QMessageBox.warning(self, tr("common.error"), tr("presets.load_failed"))
+    
+    def _restore_file_default(self):
+        """Restore current file from default."""
+        file_path = self._get_selected_file()
+        if not file_path or not self._preset_manager:
+            return
+        
+        if not self._preset_manager.has_default(file_path):
+            QMessageBox.information(
+                self, tr("common.info"),
+                tr("presets.no_default_saved")
+            )
+            return
+        
+        reply = QMessageBox.question(
+            self, tr("common.confirm"),
+            tr("presets.confirm_restore").format(file=file_path.name),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            if self._preset_manager.restore_default(file_path):
+                QMessageBox.information(
+                    self, tr("common.success"),
+                    tr("presets.restored_from_default").format(file=file_path.name)
+                )
+                self._on_selection_changed()  # Refresh preview
+                self.resources_changed.emit()
+            else:
+                QMessageBox.warning(self, tr("common.error"), tr("presets.restore_failed"))
+    
+    # --- Bulk preset operations ---
+    
+    def _save_all_as_default(self):
+        """Save all config files as defaults."""
+        if not self._preset_manager:
+            QMessageBox.warning(self, tr("common.warning"), tr("presets.no_profile_selected"))
+            return
+        
+        files = self._get_all_config_files()
+        if not files:
+            QMessageBox.information(self, tr("common.info"), tr("presets.no_config_files"))
+            return
+        
+        reply = QMessageBox.question(
+            self, tr("common.confirm"),
+            tr("presets.confirm_save_all_default").format(count=len(files)),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            progress = QProgressDialog(tr("common.loading"), tr("common.cancel"), 0, len(files), self)
+            progress.setWindowTitle(tr("presets.save_as_default"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(200)
+
+            count = 0
+            for i, f in enumerate(files, start=1):
+                if progress.wasCanceled():
+                    break
+                progress.setLabelText(f"{tr('presets.save_as_default')}: {f.name} ({i}/{len(files)})")
+                progress.setValue(i - 1)
+                QApplication.processEvents()
+                if self._preset_manager.save_as_default(f):
+                    count += 1
+            progress.setValue(len(files))
+            QMessageBox.information(
+                self, tr("common.success"),
+                tr("presets.saved_all_as_default").format(count=count)
+            )
+            self._update_tree_preset_indicators()
+    
+    def _save_all_preset(self):
+        """Save all config files as named preset."""
+        if not self._preset_manager:
+            QMessageBox.warning(self, tr("common.warning"), tr("presets.no_profile_selected"))
+            return
+        
+        files = self._get_all_config_files()
+        if not files:
+            QMessageBox.information(self, tr("common.info"), tr("presets.no_config_files"))
+            return
+        
+        existing_names = self._preset_manager.get_all_preset_names()
+        
+        from src.ui.dialogs.config_preset_dialog import BulkSavePresetDialog
+        dialog = BulkSavePresetDialog(files, existing_names, self)
+        
+        if dialog.exec() == QDialog.Accepted:
+            progress = QProgressDialog(tr("common.loading"), tr("common.cancel"), 0, len(files), self)
+            progress.setWindowTitle(tr("presets.save_preset"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(200)
+
+            count = 0
+            for i, f in enumerate(files, start=1):
+                if progress.wasCanceled():
+                    break
+                progress.setLabelText(f"{tr('presets.save_preset')}: {f.name} ({i}/{len(files)})")
+                progress.setValue(i - 1)
+                QApplication.processEvents()
+                if self._preset_manager.save_preset(f, dialog.preset_name, dialog.description):
+                    count += 1
+            progress.setValue(len(files))
+            QMessageBox.information(
+                self, tr("common.success"),
+                tr("presets.saved_all_preset").format(name=dialog.preset_name, count=count)
+            )
+            self._update_tree_preset_indicators()
+    
+    def _load_all_preset(self):
+        """Load preset for all config files."""
+        if not self._preset_manager:
+            QMessageBox.warning(self, tr("common.warning"), tr("presets.no_profile_selected"))
+            return
+        
+        files = self._get_all_config_files()
+        if not files:
+            QMessageBox.information(self, tr("common.info"), tr("presets.no_config_files"))
+            return
+
+        profiles = [self._preset_manager.profile_name]
+        for p in self._preset_manager.list_profiles_with_presets():
+            if p and p not in profiles:
+                profiles.append(p)
+
+        def data_provider(profile_name: str):
+            preset_names = self._preset_manager.get_all_preset_names_for_profile(profile_name)
+            files_with_presets = self._preset_manager.build_files_with_presets_for_profile(files, profile_name)
+            return preset_names, files_with_presets
+
+        from src.ui.dialogs.config_preset_dialog import BulkLoadPresetDialog
+        dialog = BulkLoadPresetDialog(profiles, data_provider, self)
+        
+        if dialog.exec() == QDialog.Accepted and dialog.selected_preset:
+            progress = QProgressDialog(tr("common.loading"), tr("common.cancel"), 0, len(files), self)
+            progress.setWindowTitle(tr("presets.load_preset"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(200)
+
+            count = 0
+            for i, f in enumerate(files, start=1):
+                if progress.wasCanceled():
+                    break
+                progress.setLabelText(f"{tr('presets.load_preset')}: {f.name} ({i}/{len(files)})")
+                progress.setValue(i - 1)
+                QApplication.processEvents()
+                if self._preset_manager.load_preset(f, dialog.selected_preset, source_profile=dialog.selected_profile):
+                    count += 1
+            progress.setValue(len(files))
+            QMessageBox.information(
+                self, tr("common.success"),
+                tr("presets.loaded_all_preset").format(name=dialog.selected_preset, count=count)
+            )
+            self._on_selection_changed()  # Refresh preview
+            self.resources_changed.emit()
+    
+    def _restore_all_default(self):
+        """Restore all config files from defaults."""
+        if not self._preset_manager:
+            QMessageBox.warning(self, tr("common.warning"), tr("presets.no_profile_selected"))
+            return
+        
+        files = self._get_all_config_files()
+        files_with_defaults = [f for f in files if self._preset_manager.has_default(f)]
+        
+        if not files_with_defaults:
+            QMessageBox.information(self, tr("common.info"), tr("presets.no_defaults_saved"))
+            return
+        
+        reply = QMessageBox.question(
+            self, tr("common.confirm"),
+            tr("presets.confirm_restore_all").format(count=len(files_with_defaults)),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            progress = QProgressDialog(tr("common.loading"), tr("common.cancel"), 0, len(files_with_defaults), self)
+            progress.setWindowTitle(tr("presets.restore_default"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(200)
+
+            count = 0
+            for i, f in enumerate(files_with_defaults, start=1):
+                if progress.wasCanceled():
+                    break
+                progress.setLabelText(f"{tr('presets.restore_default')}: {f.name} ({i}/{len(files_with_defaults)})")
+                progress.setValue(i - 1)
+                QApplication.processEvents()
+                if self._preset_manager.restore_default(f):
+                    count += 1
+            progress.setValue(len(files_with_defaults))
+            QMessageBox.information(
+                self, tr("common.success"),
+                tr("presets.restored_all_from_default").format(count=count)
+            )
+            self._on_selection_changed()  # Refresh preview
+            self.resources_changed.emit()
+    
+    def _update_tree_preset_indicators(self):
+        """Update visual indicators in tree for files with presets."""
+        if not self._preset_manager:
+            return
+        
+        def update_item(item: QTreeWidgetItem):
+            path = Path(item.data(0, Qt.UserRole))
+            if path.is_file() and path.suffix.lower() in EDITABLE_EXTENSIONS:
+                has_default = self._preset_manager.has_default(path)
+                preset_count = self._preset_manager.get_preset_count_all_profiles(path)
+                
+                # Update item appearance
+                name = path.name
+                if has_default or preset_count > 0:
+                    indicators = []
+                    if has_default:
+                        indicators.append("✓")
+                    if preset_count > 0:
+                        indicators.append(f"📑{preset_count}")
+                    item.setText(0, f"{name} [{' '.join(indicators)}]")
+                    item.setForeground(0, QColor("#4caf50"))
+                else:
+                    item.setText(0, name)
+                    item.setForeground(0, QColor(ThemeManager.get_text_color()))
+            
+            for i in range(item.childCount()):
+                update_item(item.child(i))
+        
+        for i in range(self.tree.topLevelItemCount()):
+            update_item(self.tree.topLevelItem(i))

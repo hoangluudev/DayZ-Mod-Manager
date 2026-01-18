@@ -57,9 +57,14 @@ class ModSortDialog(QDialog):
         
         # Mods list with drag-drop
         self.mods_list = QListWidget()
+        self.mods_list.setSpacing(4)
         self.mods_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.mods_list.setDefaultDropAction(Qt.MoveAction)
         self.mods_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.mods_list.setStyleSheet(
+            "QListWidget { padding: 2px; }"
+            "QListWidget::item { padding: 7px 10px; }"
+        )
         
         self._populate_list(mods_list)
         content_layout.addWidget(self.mods_list, stretch=1)
