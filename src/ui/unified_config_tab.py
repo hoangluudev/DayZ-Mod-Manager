@@ -337,19 +337,8 @@ class UnifiedConfigTab(QWidget):
         # Mission/Map section
         scroll_layout.addWidget(self._create_mission_section())
         
-        # Mission Config Merger button
-        merger_box = QGroupBox(tr("mission_merge.title"))
-        merger_layout = QVBoxLayout(merger_box)
-        
-        merger_info = QLabel(tr("mission_merge.open_mission_merger"))
-        merger_info.setStyleSheet("color: gray; font-size: 11px;")
-        merger_layout.addWidget(merger_info)
-        
-        self.btn_mission_merger = IconButton("cog", tr("mission_merge.open_mission_merger"), size=16)
-        self.btn_mission_merger.clicked.connect(self._open_mission_merger)
-        merger_layout.addWidget(self.btn_mission_merger)
-        
-        scroll_layout.addWidget(merger_box)
+        # Mission/Map section - no longer has Mission Config Merger button here
+        # (Mission Config Merger is now only in the header, next to Restore and Save buttons)
         
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -27,7 +28,8 @@ class ConfigFileType(Enum):
     EVENTS = ("events.xml", "events")
     SPAWNABLETYPES = ("cfgspawnabletypes.xml", "spawnabletypes")
     RANDOMPRESETS = ("cfgrandompresets.xml", "randompresets")
-    EVENTSPAWNS = ("cfgeventspawns.xml", "eventspawns")
+    # DayZ cfgeventspawns.xml uses <eventposdef> root
+    EVENTSPAWNS = ("cfgeventspawns.xml", "eventposdef")
     EVENTGROUPS = ("cfgeventgroups.xml", "eventgroups")  
     GLOBALS = ("globals.xml", "variables")
     ECONOMY = ("cfgeconomycore.xml", "economycore")
@@ -137,6 +139,8 @@ class MergePreview:
     total_duplicates: int = 0
     total_conflicts: int = 0
     mods_needing_manual: list[str] = field(default_factory=list)
+    # Conflict resolver output: {target_filename: [{entry: ConfigEntry, action: str}, ...]}
+    resolved_conflicts: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 def _element_to_string(elem: ET.Element, indent: int = 4) -> str:
@@ -406,10 +410,20 @@ class MissionConfigMerger:
                     if override_target:
                         target_file = override_target
                     else:
-                        if is_map_specific_file(config_file.name):
-                            target_file = get_base_config_filename(config_file.name)
+                        # Prefer filename-based inference for target mapping.
+                        # This prevents structurally-similar files (e.g., both have <event name="...">)
+                        # from being grouped into the wrong target file.
+                        base_name = (
+                            get_base_config_filename(config_file.name)
+                            if is_map_specific_file(config_file.name)
+                            else config_file.name
+                        )
+
+                        inferred_type = ConfigFileType.from_filename(base_name)
+                        if inferred_type != ConfigFileType.UNKNOWN and inferred_type.filename:
+                            target_file = inferred_type.filename
                         else:
-                            target_file = file_type.filename or config_file.name
+                            target_file = file_type.filename or base_name
                         
                     if target_file not in entries_by_file:
                         entries_by_file[target_file] = []
@@ -432,23 +446,68 @@ class MissionConfigMerger:
             existing = self._load_existing_entries(target_file)
             result = MergeResult(target_file=target_file, total_entries=len(entries))
             
+            # First, group entries by unique_key to detect conflicts between mods
+            entries_by_key = {}
             for entry in entries:
-                if entry.unique_key in existing:
-                    # Entry exists - check if identical
-                    existing_xml = existing[entry.unique_key]
-                    new_xml = _normalize_xml_element(entry.element)
+                if entry.unique_key not in entries_by_key:
+                    entries_by_key[entry.unique_key] = []
+                entries_by_key[entry.unique_key].append(entry)
+            
+            # Process each unique key
+            for key, key_entries in entries_by_key.items():
+                if len(key_entries) == 1:
+                    # Only one mod provides this entry
+                    entry = key_entries[0]
                     
-                    if existing_xml == new_xml:
-                        entry.status = MergeStatus.DUPLICATE
-                        result.duplicates += 1
+                    if key in existing:
+                        # Compare with existing mission file entry
+                        existing_xml = existing[key]
+                        new_xml = _normalize_xml_element(entry.element)
+                        
+                        if existing_xml == new_xml:
+                            entry.status = MergeStatus.DUPLICATE
+                            result.duplicates += 1
+                        else:
+                            entry.status = MergeStatus.CONFLICT
+                            result.conflicts += 1
+                            result.conflict_entries.append(entry)
                     else:
-                        entry.status = MergeStatus.CONFLICT
-                        result.conflicts += 1
-                        result.conflict_entries.append(entry)
+                        # New entry
+                        entry.status = MergeStatus.NEW
+                        result.new_entries += 1
+                        result.merged_entries.append(entry)
                 else:
-                    entry.status = MergeStatus.NEW
-                    result.new_entries += 1
-                    result.merged_entries.append(entry)
+                    # Multiple mods provide this entry - check if they're identical
+                    normalized_xmls = [_normalize_xml_element(e.element) for e in key_entries]
+                    
+                    if all(xml == normalized_xmls[0] for xml in normalized_xmls):
+                        # All identical - treat first as new/duplicate, rest as duplicates
+                        first_entry = key_entries[0]
+                        
+                        if key in existing:
+                            existing_xml = existing[key]
+                            if normalized_xmls[0] == existing_xml:
+                                first_entry.status = MergeStatus.DUPLICATE
+                                result.duplicates += 1
+                            else:
+                                first_entry.status = MergeStatus.CONFLICT
+                                result.conflicts += 1
+                                result.conflict_entries.append(first_entry)
+                        else:
+                            first_entry.status = MergeStatus.NEW
+                            result.new_entries += 1
+                            result.merged_entries.append(first_entry)
+                        
+                        # Mark others as duplicates
+                        for entry in key_entries[1:]:
+                            entry.status = MergeStatus.DUPLICATE
+                            result.duplicates += 1
+                    else:
+                        # Different XML content between mods - all are conflicts
+                        for entry in key_entries:
+                            entry.status = MergeStatus.CONFLICT
+                            result.conflicts += 1
+                            result.conflict_entries.append(entry)
                     
             preview.merge_results[target_file] = result
             preview.total_new += result.new_entries
@@ -488,6 +547,50 @@ class MissionConfigMerger:
                 tree = ET.ElementTree(root)
             
             count = 0
+
+            file_type = ConfigFileType.from_filename(target_file)
+            resolved_for_file = (getattr(preview, "resolved_conflicts", None) or {}).get(target_file, []) or []
+
+            resolved_keys: set[str] = set()
+            for res in resolved_for_file:
+                if isinstance(res, dict):
+                    entry = res.get("entry")
+                    if entry is not None and getattr(entry, "unique_key", None):
+                        resolved_keys.add(str(entry.unique_key))
+
+            def _iter_real_children(parent: ET.Element):
+                for ch in list(parent):
+                    if not isinstance(getattr(ch, "tag", None), str):
+                        continue
+                    yield ch
+
+            def _find_children_by_key(parent: ET.Element, unique_key: str) -> list[ET.Element]:
+                found: list[ET.Element] = []
+                for ch in _iter_real_children(parent):
+                    try:
+                        k = _get_unique_key(ch, file_type)
+                    except Exception:
+                        continue
+                    if k == unique_key:
+                        found.append(ch)
+                return found
+
+            def _clone_element(elem: ET.Element) -> ET.Element:
+                # ElementTree elements can't be shared across different trees safely.
+                return ET.fromstring(ET.tostring(elem, encoding="unicode"))
+
+            def _child_signature(ch: ET.Element) -> str:
+                name = ch.get("name")
+                if name:
+                    return f"{ch.tag}:name:{name}"
+                if ch.tag.lower() == "pos":
+                    x = ch.get("x") or ""
+                    y = ch.get("y") or ""
+                    z = ch.get("z") or ""
+                    a = ch.get("a") or ""
+                    return f"pos:{x}:{y}:{z}:{a}"
+                attrs = ";".join([f"{k}={v}" for k, v in sorted((ch.attrib or {}).items())])
+                return f"{ch.tag}:{attrs}"
             
             # Add new entries
             for entry in result.merged_entries:
@@ -496,10 +599,60 @@ class MissionConfigMerger:
                 root.append(comment)
                 root.append(entry.element)
                 count += 1
+
+            # Apply resolved conflicts (selected by user)
+            for res in resolved_for_file:
+                if not isinstance(res, dict):
+                    continue
+                entry = res.get("entry")
+                if entry is None:
+                    continue
+                action = str(res.get("action") or "replace")
+                unique_key = str(getattr(entry, "unique_key", ""))
+                if not unique_key:
+                    continue
+
+                if action == "merge" and file_type in (ConfigFileType.RANDOMPRESETS, ConfigFileType.EVENTSPAWNS):
+                    # Merge children into existing parent (or create one)
+                    existing_parents = _find_children_by_key(root, unique_key)
+                    if existing_parents:
+                        parent_elem = existing_parents[0]
+                    else:
+                        parent_elem = ET.Element(entry.element.tag, dict(entry.element.attrib))
+                        root.append(ET.Comment(f" MERGED (created) from {entry.source_mod} "))
+                        root.append(parent_elem)
+                        count += 1
+
+                    existing_sigs = {_child_signature(c) for c in _iter_real_children(parent_elem)}
+                    added_any = False
+                    for child in list(entry.element):
+                        if not isinstance(getattr(child, "tag", None), str):
+                            continue
+                        sig = _child_signature(child)
+                        if sig in existing_sigs:
+                            continue
+                        parent_elem.append(_clone_element(child))
+                        existing_sigs.add(sig)
+                        added_any = True
+                    if added_any:
+                        root.append(ET.Comment(f" MERGED items from {entry.source_mod} into {unique_key} "))
+                else:
+                    # Replace: remove existing entries with same key and append the selected one
+                    for ch in _find_children_by_key(root, unique_key):
+                        try:
+                            root.remove(ch)
+                        except ValueError:
+                            pass
+                    root.append(ET.Comment(f" RESOLVED CONFLICT (replace) from {entry.source_mod} "))
+                    root.append(_clone_element(entry.element))
+                    count += 1
                 
             # Optionally add conflict entries
             if include_conflicts:
                 for entry in result.conflict_entries:
+                    # Skip conflicts that the user already resolved.
+                    if str(getattr(entry, "unique_key", "")) in resolved_keys:
+                        continue
                     comment = ET.Comment(
                         f" CONFLICT: Overwrites existing entry. Source: {entry.source_mod} "
                     )

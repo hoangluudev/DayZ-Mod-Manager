@@ -55,6 +55,28 @@ class AppearanceTab(BaseSubTab):
         self.lang_box.add_layout(lang_form)
         self.add_widget(self.lang_box)
         
+        # Date Format Section
+        self.date_box = SectionBox(tr("settings.date_format"))
+        date_form = QFormLayout()
+        date_form.setSpacing(12)
+        
+        self.cmb_date_format = QComboBox()
+        self.cmb_date_format.addItem("dd/MM/yyyy (31/12/2024)", "dd/MM/yyyy")
+        self.cmb_date_format.addItem("MM/dd/yyyy (12/31/2024)", "MM/dd/yyyy")
+        self.cmb_date_format.addItem("yyyy-MM-dd (2024-12-31)", "yyyy-MM-dd")
+        self.cmb_date_format.addItem("yyyy/MM/dd (2024/12/31)", "yyyy/MM/dd")
+        self.cmb_date_format.addItem("dd-MM-yyyy (31-12-2024)", "dd-MM-yyyy")
+        self.cmb_date_format.addItem("dd.MM.yyyy (31.12.2024)", "dd.MM.yyyy")
+        self.cmb_date_format.currentIndexChanged.connect(self._on_date_format_changed)
+        date_form.addRow(tr("settings.select_date_format") + ":", self.cmb_date_format)
+        
+        self.lbl_date_desc = QLabel(tr("settings.date_format_desc"))
+        self.lbl_date_desc.setStyleSheet("color: gray; font-size: 11px;")
+        date_form.addRow("", self.lbl_date_desc)
+        
+        self.date_box.add_layout(date_form)
+        self.add_widget(self.date_box)
+        
         # Theme Section - CurseForge-style theme cards
         self.theme_box = SectionBox(tr("settings.theme"))
         theme_layout = QVBoxLayout()
@@ -235,8 +257,12 @@ class AppearanceTab(BaseSubTab):
         index = self.cmb_language.findData(current_lang)
         if index >= 0:
             self.cmb_language.setCurrentIndex(index)
-        
-        # Theme cards
+                # Date format
+        current_date_format = self.settings.settings.datetime_format
+        index = self.cmb_date_format.findData(current_date_format)
+        if index >= 0:
+            self.cmb_date_format.setCurrentIndex(index)
+                # Theme cards
         self._rebuild_theme_cards()
     
     def _on_language_changed(self, index):
@@ -247,11 +273,20 @@ class AppearanceTab(BaseSubTab):
             self.settings.settings.language = lang
             self.settings.save()
             self.language_changed.emit()
-    
+
+    def _on_date_format_changed(self, index):
+        """Handle date format change."""
+        date_format = self.cmb_date_format.itemData(index)
+        if date_format:
+            self.settings.settings.datetime_format = date_format
+            self.settings.save()
+
     def update_texts(self):
         """Update UI texts."""
         self.lang_box.setTitle(tr("settings.language"))
         self.lbl_lang_desc.setText(tr("settings.language_desc"))
+        self.date_box.setTitle(tr("settings.date_format"))
+        self.lbl_date_desc.setText(tr("settings.date_format_desc"))
         self.theme_box.setTitle(tr("settings.theme"))
         self.lbl_theme_desc.setText(tr("settings.theme_desc"))
         # Rebuild cards so any translated strings (if added later) refresh.

@@ -26,16 +26,17 @@ from src.utils.locale_manager import tr
 from src.utils.mod_utils import (
     format_file_size, find_mod_bikeys, format_mods_txt,
     scan_workshop_mods, scan_installed_mods, get_mod_version,
-    get_folder_size
+    get_folder_size, format_datetime
 )
+from src.core.settings_manager import SettingsManager
 
 
 # Column constants
 class WorkshopColumns:
-    CHECK, NAME, VERSION, SIZE, STATUS = range(5)
+    CHECK, NAME, VERSION, SIZE, DATE, STATUS = range(6)
 
 class InstalledColumns:
-    CHECK, NAME, VERSION, SIZE, BIKEY, ACTIONS = range(6)
+    CHECK, NAME, VERSION, SIZE, DATE, BIKEY, ACTIONS = range(7)
 
 
 class ModsTab(BaseTab):
@@ -51,8 +52,8 @@ class ModsTab(BaseTab):
         self.worker = None
         self._current_operation: str | None = None
         self.progress_dialog = None
-        self._workshop_items: list[tuple[str, str, str, int, bool]] = []
-        self._installed_items: list[tuple[str, str, int, bool, list]] = []
+        self._workshop_items: list[tuple[str, str, str, int, bool, object]] = []  # Added install_date
+        self._installed_items: list[tuple[str, str, int, bool, list, object]] = []  # Added install_date
         self._populating = False
         
         self._setup_content()
@@ -197,10 +198,10 @@ class ModsTab(BaseTab):
     def _create_workshop_table(self) -> QTableWidget:
         """Create and configure workshop table."""
         table = QTableWidget()
-        table.setColumnCount(5)
+        table.setColumnCount(6)
         table.setHorizontalHeaderLabels([
             "", tr("mods.mod_name"), tr("mods.mod_version"),
-            tr("mods.mod_size"), tr("mods.mod_status")
+            tr("mods.mod_size"), tr("mods.mod_date"), tr("mods.mod_status")
         ])
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -208,6 +209,7 @@ class ModsTab(BaseTab):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setAlternatingRowColors(True)
         table.itemChanged.connect(self._on_workshop_item_changed)
@@ -216,10 +218,10 @@ class ModsTab(BaseTab):
     def _create_installed_table(self) -> QTableWidget:
         """Create and configure installed mods table."""
         table = QTableWidget()
-        table.setColumnCount(6)
+        table.setColumnCount(7)
         table.setHorizontalHeaderLabels([
             "", tr("mods.mod_name"), tr("mods.mod_version"),
-            tr("mods.mod_size"), tr("mods.bikey_status"), tr("common.actions")
+            tr("mods.mod_size"), tr("mods.mod_date"), tr("mods.bikey_status"), tr("common.actions")
         ])
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -227,8 +229,9 @@ class ModsTab(BaseTab):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.Fixed)
-        table.setColumnWidth(5, 80)  # Fixed width for actions column to prevent overflow
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        table.setColumnWidth(6, 80)  # Fixed width for actions column to prevent overflow
         # Ensure rows are tall enough to accommodate action buttons
         try:
             table.verticalHeader().setDefaultSectionSize(36)
@@ -289,17 +292,24 @@ class ModsTab(BaseTab):
             # Use utility function
             self._workshop_items = scan_workshop_mods(workshop_path, server_path)
             
-            # Get installed versions for comparison
+            # Get installed versions and dates for comparison
             installed_mods = {}
+            installed_dates = {}
             if server_path and server_path.exists():
                 for item in server_path.iterdir():
                     if item.is_dir() and item.name.startswith("@"):
                         installed_mods[item.name.lower()] = get_mod_version(item)
+                        # Get server install date for highlighting outdated mods
+                        from src.utils.mod_utils import get_folder_install_date
+                        installed_dates[item.name.lower()] = get_folder_install_date(item)
+            
+            # Store for later comparison (highlighting outdated mods)
+            self._installed_dates = installed_dates
             
             # Populate table
             self.workshop_table.setRowCount(len(self._workshop_items))
-            for row, (workshop_id, mod_folder, version, size, is_installed) in enumerate(self._workshop_items):
-                self._populate_workshop_row(row, workshop_id, mod_folder, version, size, is_installed, installed_mods)
+            for row, (workshop_id, mod_folder, version, size, is_installed, install_date) in enumerate(self._workshop_items):
+                self._populate_workshop_row(row, workshop_id, mod_folder, version, size, is_installed, install_date, installed_mods)
             
             self._update_ws_count()
         finally:
@@ -307,7 +317,7 @@ class ModsTab(BaseTab):
     
     def _populate_workshop_row(self, row: int, workshop_id: str, mod_folder: str,
                                version: str, size: int, is_installed: bool,
-                               installed_mods: dict):
+                               install_date, installed_mods: dict):
         """Populate a single workshop table row."""
         # Checkbox
         check_item = QTableWidgetItem()
@@ -330,6 +340,13 @@ class ModsTab(BaseTab):
         size_item = QTableWidgetItem(format_file_size(size))
         size_item.setFlags(size_item.flags() & ~Qt.ItemIsEditable)
         self.workshop_table.setItem(row, WorkshopColumns.SIZE, size_item)
+        
+        # Date
+        date_format = self.settings.settings.datetime_format
+        date_item = QTableWidgetItem(format_datetime(install_date, date_format))
+        date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
+        date_item.setData(Qt.UserRole, install_date)  # Store datetime for comparison
+        self.workshop_table.setItem(row, WorkshopColumns.DATE, date_item)
         
         # Status
         status_text, status_icon, status_color = self._get_workshop_status(
@@ -370,10 +387,17 @@ class ModsTab(BaseTab):
             # Use utility function
             self._installed_items = scan_installed_mods(server_path)
             
+            # Build workshop dates map for comparison (to highlight outdated mods)
+            workshop_dates = {}
+            for item in self._workshop_items:
+                if len(item) >= 6:
+                    mod_name = item[1].lower()
+                    workshop_dates[mod_name] = item[5]  # install_date
+            
             # Populate table
             self.installed_table.setRowCount(len(self._installed_items))
-            for row, (mod_folder, version, size, has_bikey, mod_bikeys) in enumerate(self._installed_items):
-                self._populate_installed_row(row, mod_folder, version, size, has_bikey, mod_bikeys)
+            for row, (mod_folder, version, size, has_bikey, mod_bikeys, install_date) in enumerate(self._installed_items):
+                self._populate_installed_row(row, mod_folder, version, size, has_bikey, mod_bikeys, install_date, workshop_dates)
             
             self._update_inst_count()
             self._maybe_initialize_mods_txt()
@@ -381,8 +405,15 @@ class ModsTab(BaseTab):
             self._populating = False
     
     def _populate_installed_row(self, row: int, mod_folder: str, version: str,
-                                size: int, has_bikey: bool, mod_bikeys: list):
+                                size: int, has_bikey: bool, mod_bikeys: list,
+                                install_date, workshop_dates: dict):
         """Populate a single installed table row."""
+        # Check if this mod has an update in workshop (workshop date > server install date)
+        has_update = False
+        workshop_date = workshop_dates.get(mod_folder.lower())
+        if workshop_date and install_date:
+            has_update = workshop_date > install_date
+        
         # Checkbox
         check_item = QTableWidgetItem()
         check_item.setFlags(check_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
@@ -393,17 +424,31 @@ class ModsTab(BaseTab):
         # Name
         name_item = QTableWidgetItem(mod_folder)
         name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+        if has_update:
+            name_item.setForeground(QColor("#ff9800"))  # Orange for outdated
+            name_item.setToolTip(tr("mods.update_available_tooltip"))
         self.installed_table.setItem(row, InstalledColumns.NAME, name_item)
         
         # Version
         version_item = QTableWidgetItem(version or "-")
         version_item.setFlags(version_item.flags() & ~Qt.ItemIsEditable)
+        if has_update:
+            version_item.setForeground(QColor("#ff9800"))
         self.installed_table.setItem(row, InstalledColumns.VERSION, version_item)
         
         # Size
         size_item = QTableWidgetItem(format_file_size(size))
         size_item.setFlags(size_item.flags() & ~Qt.ItemIsEditable)
         self.installed_table.setItem(row, InstalledColumns.SIZE, size_item)
+        
+        # Date
+        date_format = self.settings.settings.datetime_format
+        date_item = QTableWidgetItem(format_datetime(install_date, date_format))
+        date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
+        date_item.setData(Qt.UserRole, install_date)
+        if has_update:
+            date_item.setForeground(QColor("#ff9800"))
+        self.installed_table.setItem(row, InstalledColumns.DATE, date_item)
         
         # Bikey status
         bikey_text, bikey_icon, bikey_color = self._get_bikey_status(has_bikey, mod_bikeys)
@@ -503,7 +548,8 @@ class ModsTab(BaseTab):
     
     # ========== Selection ==========
     
-    def _set_all_checked(self, table: QTableWidget, checked: bool, visible_only: bool = False):
+    def _set_all_checked(self, table: QTableWidget, checked: bool, visible_only: bool = True):
+        """Set check state for all rows, optionally only visible (not hidden by filter)."""
         self._populating = True
         try:
             state = Qt.Checked if checked else Qt.Unchecked
@@ -517,19 +563,23 @@ class ModsTab(BaseTab):
             self._populating = False
     
     def _select_all_workshop(self):
-        self._set_all_checked(self.workshop_table, True)
+        # Select only visible (filtered) rows
+        self._set_all_checked(self.workshop_table, True, visible_only=True)
         self._update_ws_count()
     
     def _deselect_all_workshop(self):
-        self._set_all_checked(self.workshop_table, False)
+        # Deselect only visible (filtered) rows
+        self._set_all_checked(self.workshop_table, False, visible_only=True)
         self._update_ws_count()
     
     def _select_all_installed(self):
+        # Select only visible (filtered) rows
         self._set_all_checked(self.installed_table, True, visible_only=True)
         self._update_inst_count()
     
     def _deselect_all_installed(self):
-        self._set_all_checked(self.installed_table, False)
+        # Deselect only visible (filtered) rows
+        self._set_all_checked(self.installed_table, False, visible_only=True)
         self._update_inst_count()
     
     def _get_selected_workshop_mods(self) -> list[tuple[str, str]]:
@@ -893,9 +943,9 @@ class ModsTab(BaseTab):
         
         self.workshop_table.setHorizontalHeaderLabels([
             "", tr("mods.mod_name"), tr("mods.mod_version"),
-            tr("mods.mod_size"), tr("mods.mod_status")
+            tr("mods.mod_size"), tr("mods.mod_date"), tr("mods.mod_status")
         ])
         self.installed_table.setHorizontalHeaderLabels([
             "", tr("mods.mod_name"), tr("mods.mod_version"),
-            tr("mods.mod_size"), tr("mods.bikey_status"), tr("common.actions")
+            tr("mods.mod_size"), tr("mods.mod_date"), tr("mods.bikey_status"), tr("common.actions")
         ])

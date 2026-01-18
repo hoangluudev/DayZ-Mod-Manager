@@ -16,6 +16,7 @@ class AppSettings:
     # Appearance - simplified theme system (theme pack ID)
     theme: str = "default"  # Theme pack ID (e.g., "default", "midnight")
     language: str = "en"
+    datetime_format: str = "dd/MM/yyyy"  # Date format: dd/MM/yyyy, MM/dd/yyyy, yyyy-MM-dd, etc.
     
     # Paths
     steamcmd_path: str = ""
