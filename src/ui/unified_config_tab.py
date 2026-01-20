@@ -85,6 +85,12 @@ class UnifiedConfigTab(QWidget):
         self.btn_mission_merger_header.clicked.connect(self._open_mission_merger)
         header.addWidget(self.btn_mission_merger_header)
         
+        # Fix duplicates button
+        self.btn_fix_duplicates = IconButton("refresh", tr("mission_merge.fix_duplicates"), size=16)
+        self.btn_fix_duplicates.setEnabled(False)
+        self.btn_fix_duplicates.clicked.connect(self._open_duplicate_fixer)
+        header.addWidget(self.btn_fix_duplicates)
+        
         # Restore button
         self.btn_restore = IconButton("undo", tr("config.restore_changes"), size=16)
         self.btn_restore.setEnabled(False)
@@ -476,6 +482,9 @@ class UnifiedConfigTab(QWidget):
 
         if hasattr(self, "btn_mission_merger_header"):
             self.btn_mission_merger_header.setEnabled(True)
+        
+        if hasattr(self, "btn_fix_duplicates"):
+            self.btn_fix_duplicates.setEnabled(True)
         
         server_path = profile_data.get("server_path", "")
         self.txt_server_location.setText(server_path)
@@ -1096,6 +1105,23 @@ goto start
         dialog.merge_completed.connect(self._on_mission_merge_completed)
         dialog.exec()
     
+    def _open_duplicate_fixer(self):
+        """Open the Duplicate Fixer dialog."""
+        if not self.current_profile:
+            QMessageBox.warning(self, tr("common.warning"), tr("config.select_profile_first"))
+            return
+        
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+        
+        mission_template = self.cmb_map.currentData() or "dayzOffline.chernarusplus"
+        
+        from src.ui.dialogs.mission_merge_dialog import DuplicateFixerDialog
+        dialog = DuplicateFixerDialog(server_path, mission_template, self)
+        dialog.exec()
+    
     def _on_mission_merge_completed(self, result: dict):
         """Handle mission merge completion."""
         # Refresh resources browser if visible
@@ -1111,6 +1137,8 @@ goto start
         self.lbl_title.setText(f"<h2>{tr('config.unified_title')}</h2>")
         if hasattr(self, "btn_mission_merger_header"):
             self.btn_mission_merger_header.setText(tr("mission_merge.open_mission_merger"))
+        if hasattr(self, "btn_fix_duplicates"):
+            self.btn_fix_duplicates.setText(tr("mission_merge.fix_duplicates"))
         self.btn_restore.setText(tr("config.restore_changes"))
         self.btn_save.setText(tr("common.save"))
         self.lbl_no_profile.setText(tr("config.select_profile_first"))

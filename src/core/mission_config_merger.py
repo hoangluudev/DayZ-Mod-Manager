@@ -13,12 +13,15 @@ Key features:
 from __future__ import annotations
 
 import re
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
+
+from src.models.xml_config_models import ConfigTypeRegistry, XMLMergeHelper
 
 
 class ConfigFileType(Enum):
@@ -161,6 +164,17 @@ def _get_unique_key(element: ET.Element, parent_type: ConfigFileType) -> str:
     For cfgspawnabletypes.xml: name attribute of <type>
     etc.
     """
+    # cfgspawnabletypes.xml: allow repeated <type name="..."> with different content.
+    # Key by stable digest of normalized element XML so different loot-table options don't
+    # become false duplicates/conflicts. Identical definitions still dedupe.
+    if parent_type == ConfigFileType.SPAWNABLETYPES:
+        name = element.get("name") or element.get("type") or element.get("id") or ""
+        normalized = _normalize_xml_element(element)
+        digest = hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()[:12]
+        if name:
+            return f"{element.tag}:{name}:{digest}"
+        return f"{element.tag}:{digest}"
+
     # Most DayZ config elements use 'name' attribute as unique key
     name = element.get("name") or element.get("type") or element.get("id")
     if name:
@@ -267,8 +281,7 @@ class MissionConfigMerger:
             return entries
             
         try:
-            tree = ET.parse(file_path)
-            root = tree.getroot()
+            _, root, _ = XMLMergeHelper.parse_xml_file(file_path)
             file_type = ConfigFileType.from_root_element(root.tag)
             
             for child in root:
@@ -281,8 +294,14 @@ class MissionConfigMerger:
         self._existing_entries[filename] = entries
         return entries
     
-    def scan_mod_configs(self, mod_path: Path) -> Optional[ModConfigInfo]:
-        """Scan a mod folder for config files to merge."""
+    def scan_mod_configs(self, mod_path: Path, scan_all_xml: bool = True) -> Optional[ModConfigInfo]:
+        """Scan a mod folder for config files to merge.
+        
+        Args:
+            mod_path: Path to the mod folder
+            scan_all_xml: If True, scan ALL .xml files regardless of parent class.
+                         If False, only include files with known parent classes.
+        """
         mod_name = mod_path.name
         info = ModConfigInfo(mod_name=mod_name, mod_path=mod_path)
         
@@ -315,16 +334,30 @@ class MissionConfigMerger:
                 # Skip known non-config files
                 if xml_file.name.lower() in ["config.xml", "meta.xml", "mod.xml"]:
                     continue
+                
+                # Avoid duplicates
+                if xml_file in info.config_files:
+                    continue
                     
                 # Try to parse and detect type
                 try:
-                    tree = ET.parse(xml_file)
-                    root = tree.getroot()
+                    _, root, model_class = XMLMergeHelper.parse_xml_file(xml_file)
                     file_type = ConfigFileType.from_root_element(root.tag)
                     
-                    if file_type != ConfigFileType.UNKNOWN:
+                    # If scan_all_xml is True, include all .xml files
+                    # Otherwise, only include files with known parent classes
+                    if scan_all_xml or file_type != ConfigFileType.UNKNOWN:
                         info.config_files.append(xml_file)
                         info.entries_count += len(list(root))
+                        
+                        # Mark unknown types for manual review
+                        if file_type == ConfigFileType.UNKNOWN and model_class is None:
+                            info.needs_manual_review = True
+                            if not info.manual_review_reason:
+                                info.manual_review_reason = (
+                                    f"File '{xml_file.name}' has unknown parent class '{root.tag}' - "
+                                    f"requires manual target selection"
+                                )
                         
                         # Check for map-specific
                         if is_map_specific_file(xml_file.name):
@@ -343,26 +376,35 @@ class MissionConfigMerger:
                     # Not a valid XML or cannot be read, skip without failing the full scan.
                     # On Windows it's possible to have folders that match '*.xml' or files with denied access.
                     if isinstance(e, PermissionError):
-                        inferred = ConfigFileType.from_filename(xml_file.name)
-                        if inferred != ConfigFileType.UNKNOWN:
-                            if xml_file not in info.config_files:
-                                info.config_files.append(xml_file)
-                            info.needs_manual_review = True
-                            if not info.manual_review_reason:
-                                info.manual_review_reason = f"Cannot read file due to permission: {xml_file.name}"
+                        if xml_file not in info.config_files:
+                            info.config_files.append(xml_file)
+                        info.needs_manual_review = True
+                        if not info.manual_review_reason:
+                            info.manual_review_reason = f"Cannot read file due to permission: {xml_file.name}"
+                    elif scan_all_xml:
+                        # Include unparseable XML files for manual review
+                        if xml_file not in info.config_files:
+                            info.config_files.append(xml_file)
+                        info.needs_manual_review = True
+                        if not info.manual_review_reason:
+                            info.manual_review_reason = f"Cannot parse XML file: {xml_file.name}"
                     pass
                     
         if info.config_files:
             return info
         return None
     
-    def scan_all_mods(self) -> list[ModConfigInfo]:
-        """Scan all installed mods for config files."""
+    def scan_all_mods(self, scan_all_xml: bool = True) -> list[ModConfigInfo]:
+        """Scan all installed mods for config files.
+        
+        Args:
+            scan_all_xml: If True, scan ALL .xml files regardless of parent class.
+        """
         results = []
         
         for item in self.server_path.iterdir():
             if item.is_dir() and item.name.startswith("@"):
-                mod_info = self.scan_mod_configs(item)
+                mod_info = self.scan_mod_configs(item, scan_all_xml=scan_all_xml)
                 if mod_info:
                     results.append(mod_info)
                     
@@ -393,8 +435,7 @@ class MissionConfigMerger:
                 
             for config_file in mod_info.config_files:
                 try:
-                    tree = ET.parse(config_file)
-                    root = tree.getroot()
+                    _, root, model_class = XMLMergeHelper.parse_xml_file(config_file)
                     file_type = ConfigFileType.from_root_element(root.tag)
                     
                     # Determine target filename
@@ -423,7 +464,29 @@ class MissionConfigMerger:
                         if inferred_type != ConfigFileType.UNKNOWN and inferred_type.filename:
                             target_file = inferred_type.filename
                         else:
-                            target_file = file_type.filename or base_name
+                            # Fall back to model inference for non-standard filenames like
+                            # 'Add to Types.xml' or other fragment dumps.
+                            if model_class is None:
+                                model_class = ConfigTypeRegistry.get_model_for_file(config_file)
+
+                            model_to_filename = {
+                                # Standard mission filenames
+                                "types": "types.xml",
+                                "spawnabletypes": "cfgspawnabletypes.xml",
+                                "randompresets": "cfgrandompresets.xml",
+                                "events": "events.xml",
+                                "eventposdef": "cfgeventspawns.xml",
+                                "ignore": "cfgignorelist.xml",
+                                "weather": "cfgweather.xml",
+                                "economycore": "cfgeconomycore.xml",
+                                "env": "cfgenvironment.xml",
+                            }
+
+                            if model_class is not None:
+                                root_name = str(model_class.get_root_element()).lower()
+                                target_file = model_to_filename.get(root_name, base_name)
+                            else:
+                                target_file = file_type.filename or base_name
                         
                     if target_file not in entries_by_file:
                         entries_by_file[target_file] = []
@@ -537,8 +600,7 @@ class MissionConfigMerger:
             
             # Load or create target file
             if file_path.exists():
-                tree = ET.parse(file_path)
-                root = tree.getroot()
+                tree, root, _ = XMLMergeHelper.parse_xml_file(file_path)
             else:
                 # Create new file with appropriate root
                 file_type = ConfigFileType.from_filename(target_file)

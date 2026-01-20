@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Type
 
 from xml.etree import ElementTree as ET
 
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QCheckBox, QTabWidget, QWidget,
     QProgressDialog, QHeaderView, QFrame,
     QTableWidget, QTableWidgetItem, QComboBox, QAbstractItemView,
-    QSplitter, QListWidget, QListWidgetItem
+    QSplitter, QListWidget, QListWidgetItem, QSizePolicy, QApplication, QStyle
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
@@ -34,6 +34,13 @@ from src.core.mission_config_merger import (
     MergeStatus, ConfigEntry, get_mission_folder_path,
     ConfigFileType, detect_map_from_filename,
     is_map_specific_file, get_base_config_filename
+)
+from src.models.xml_config_models import (
+    ConfigTypeRegistry, XMLMergeHelper, MergeStrategy, FieldMergeRule,
+    TypesXMLModel, SpawnableTypesXMLModel, RandomPresetsXMLModel,
+    EventsXMLModel, EventSpawnsXMLModel, IgnoreListXMLModel,
+    WeatherXMLModel, EconomyCoreXMLModel, EnvironmentXMLModel,
+    MapGroupXMLModel, MapProtoXMLModel
 )
 from src.ui.widgets.icon_button import IconButton
 from src.utils.locale_manager import tr
@@ -248,7 +255,7 @@ class MissionConfigMergeDialog(QDialog):
         # Header with info
         self._create_header(layout)
         
-        # Main content - vertical layout (no splitter)
+        # Main content - horizontal splitter with table left and tabs right
         self._create_main_content(layout)
         
         # Summary bar
@@ -295,18 +302,31 @@ class MissionConfigMergeDialog(QDialog):
         layout.addWidget(self.lbl_mission)
         
     def _create_main_content(self, layout: QVBoxLayout):
-        """Create main content area with two side-by-side tables and preview tabs."""
-        tables_row = QHBoxLayout()
+        """Create main content area with source table on left and tabs on right."""
+        # Main horizontal splitter
+        main_splitter = QSplitter(Qt.Horizontal)
+        
+        # Left: Source files with tabs for Valid/Invalid
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        sources_label = QLabel(f"<b>{tr('mission_merge.mods_with_configs')}</b>")
+        left_layout.addWidget(sources_label)
 
-        # Left: Source files (mods)
-        sources_group = QGroupBox(tr("mission_merge.mods_with_configs"))
-        sources_layout = QVBoxLayout(sources_group)
-
+        # Tab widget for Valid/Invalid source files
+        self.source_tabs = QTabWidget()
+        
+        # Tab 1: Valid files (can be merged)
+        valid_tab = QWidget()
+        valid_layout = QVBoxLayout(valid_tab)
+        valid_layout.setContentsMargins(4, 4, 4, 4)
+        
         self.tbl_sources = QTableWidget(0, 7)
         self.tbl_sources.setHorizontalHeaderLabels([
             "",  # Checkbox - no header text
             tr("mission_merge.col_file"),
-            tr("mission_merge.col_parent"),
+            tr("mission_merge.col_type"),
             tr("mission_merge.col_entries"),
             tr("mission_merge.col_action"),
             tr("mission_merge.col_target"),
@@ -315,42 +335,113 @@ class MissionConfigMergeDialog(QDialog):
         self.tbl_sources.setAlternatingRowColors(False)
         self.tbl_sources.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_sources.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl_sources.setMinimumHeight(350)
-        self.tbl_sources.verticalHeader().setDefaultSectionSize(32)  # Row height
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Checkbox
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)  # File
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Parent
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Entries
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)  # Action
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(5, QHeaderView.Interactive)  # Target
-        self.tbl_sources.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)  # Status
-        self.tbl_sources.setColumnWidth(4, 160)  # Action combo width
-        self.tbl_sources.setColumnWidth(5, 200)  # Target combo width
+        self.tbl_sources.verticalHeader().setDefaultSectionSize(32)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(5, QHeaderView.Interactive)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.tbl_sources.setColumnWidth(4, 140)
+        self.tbl_sources.setColumnWidth(5, 180)
         self.tbl_sources.verticalHeader().setVisible(False)
-
-        from PySide6.QtWidgets import QSizePolicy
+        self.tbl_sources.itemSelectionChanged.connect(self._on_source_file_selected)
         self.tbl_sources.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        sources_layout.addWidget(self.tbl_sources)
+        valid_layout.addWidget(self.tbl_sources)
+        
+        self.source_tabs.addTab(valid_tab, tr("mission_merge.tab_valid_files"))
+        
+        # Tab 2: Invalid files (cannot be parsed/merged)
+        invalid_tab = QWidget()
+        invalid_layout = QVBoxLayout(invalid_tab)
+        invalid_layout.setContentsMargins(4, 4, 4, 4)
+        
+        invalid_info = QLabel(tr("mission_merge.invalid_files_info"))
+        invalid_info.setStyleSheet("color: #ff9800; font-size: 11px;")
+        invalid_info.setWordWrap(True)
+        invalid_layout.addWidget(invalid_info)
+        
+        self.tbl_invalid_sources = QTableWidget(0, 4)
+        self.tbl_invalid_sources.setHorizontalHeaderLabels([
+            tr("mission_merge.col_file"),
+            tr("mission_merge.col_mod"),
+            tr("mission_merge.col_reason"),
+            tr("mission_merge.col_path"),
+        ])
+        self.tbl_invalid_sources.setAlternatingRowColors(False)
+        self.tbl_invalid_sources.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl_invalid_sources.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl_invalid_sources.verticalHeader().setDefaultSectionSize(28)
+        self.tbl_invalid_sources.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.tbl_invalid_sources.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.tbl_invalid_sources.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.tbl_invalid_sources.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+        self.tbl_invalid_sources.setColumnWidth(0, 180)
+        self.tbl_invalid_sources.setColumnWidth(3, 300)
+        self.tbl_invalid_sources.verticalHeader().setVisible(False)
+        self.tbl_invalid_sources.itemSelectionChanged.connect(self._on_invalid_file_selected)
+        self.tbl_invalid_sources.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        invalid_layout.addWidget(self.tbl_invalid_sources)
+        
+        self.source_tabs.addTab(invalid_tab, tr("mission_merge.tab_invalid_files"))
+        
+        left_layout.addWidget(self.source_tabs)
 
         self.lbl_mapping_warnings = QLabel("")
         self.lbl_mapping_warnings.setStyleSheet("color: #ff9800; font-size: 11px;")
         self.lbl_mapping_warnings.setWordWrap(True)
-        sources_layout.addWidget(self.lbl_mapping_warnings)
+        left_layout.addWidget(self.lbl_mapping_warnings)
 
         self.chk_ignore_mapping_warnings = QCheckBox(tr("mission_merge.ignore_mapping_warnings"))
         self.chk_ignore_mapping_warnings.setToolTip(tr("mission_merge.ignore_mapping_warnings_tooltip"))
         self.chk_ignore_mapping_warnings.setChecked(False)
-        sources_layout.addWidget(self.chk_ignore_mapping_warnings)
-        tables_row.addWidget(sources_group, stretch=3)
+        left_layout.addWidget(self.chk_ignore_mapping_warnings)
+        
+        main_splitter.addWidget(left_widget)
 
-        # Right: Mission target files
-        targets_group = QGroupBox(tr("mission_merge.targets"))
-        targets_layout = QVBoxLayout(targets_group)
+        # Right: Tab widget with Mission targets, File preview, Overview, etc.
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.tabs = QTabWidget()
+        
+        # Tab 1: Mission Target Files
+        targets_tab = self._create_targets_tab()
+        self.tabs.addTab(targets_tab, tr("mission_merge.targets"))
+        
+        # Tab 2: File Preview (when selecting a file from left table)
+        file_preview_tab = self._create_file_preview_tab()
+        self.tabs.addTab(file_preview_tab, tr("mission_merge.tab_file_preview"))
+        
+        # Tab 3: Overview
+        overview_tab = self._create_overview_tab()
+        self.tabs.addTab(overview_tab, tr("mission_merge.tab_overview"))
+        
+        # Tab 4: Entries  
+        entries_tab = self._create_entries_tab()
+        self.tabs.addTab(entries_tab, tr("mission_merge.tab_entries"))
+        
+        right_layout.addWidget(self.tabs)
+        main_splitter.addWidget(right_widget)
+        
+        # Set splitter sizes (60% left, 40% right)
+        main_splitter.setStretchFactor(0, 6)
+        main_splitter.setStretchFactor(1, 4)
+        main_splitter.setSizes([600, 400])
+        
+        layout.addWidget(main_splitter, stretch=1)
+    
+    def _create_targets_tab(self) -> QWidget:
+        """Create tab showing mission target files."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        self.tbl_targets = QTableWidget(0, 5)
+        self.tbl_targets = QTableWidget(0, 4)
         self.tbl_targets.setHorizontalHeaderLabels([
             tr("mission_merge.target_file"),
-            tr("mission_merge.col_parent"),
             tr("mission_merge.exists"),
             tr("mission_merge.entries"),
             tr("mission_merge.col_path"),
@@ -358,43 +449,297 @@ class MissionConfigMergeDialog(QDialog):
         self.tbl_targets.setAlternatingRowColors(False)
         self.tbl_targets.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_targets.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl_targets.setMinimumHeight(350)
-        self.tbl_targets.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)  # File
-        self.tbl_targets.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Parent
-        self.tbl_targets.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Exists
-        self.tbl_targets.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Entries
-        self.tbl_targets.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)  # Path
-        self.tbl_targets.setColumnWidth(0, 200)  # File name width
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.tbl_targets.setColumnWidth(0, 200)
         self.tbl_targets.verticalHeader().setVisible(False)
+        self.tbl_targets.verticalHeader().setDefaultSectionSize(28)
+
         self.tbl_targets.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.tbl_targets.verticalHeader().setDefaultSectionSize(28)  # Row height
+        layout.addWidget(self.tbl_targets)
+        
+        return widget
+    
+    def _create_file_preview_tab(self) -> QWidget:
+        """Create tab for previewing selected source file content."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Info label
+        self.lbl_file_preview_info = QLabel(tr("mission_merge.select_file_to_preview"))
+        self.lbl_file_preview_info.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(self.lbl_file_preview_info)
+        
+        # File info
+        info_layout = QHBoxLayout()
+        self.lbl_file_name = QLabel("")
+        self.lbl_file_name.setStyleSheet("font-weight: bold;")
+        info_layout.addWidget(self.lbl_file_name)
+        info_layout.addStretch()
+        self.lbl_file_entries = QLabel("")
+        self.lbl_file_entries.setStyleSheet("color: #4caf50;")
+        info_layout.addWidget(self.lbl_file_entries)
+        layout.addLayout(info_layout)
+        
+        # XML content
+        self.txt_file_preview = QTextEdit()
+        self.txt_file_preview.setReadOnly(True)
+        self.txt_file_preview.setFont(QFont("Consolas", 10))
+        self.txt_file_preview.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+        """)
+        layout.addWidget(self.txt_file_preview)
+        
+        return widget
+    
+    def _on_source_file_selected(self):
+        """Handle selection change in source files table."""
+        selected_rows = self.tbl_sources.selectedItems()
+        if not selected_rows:
+            return
+        
+        # Get the first selected row
+        row = self.tbl_sources.currentRow()
+        use_item = self.tbl_sources.item(row, 0)
+        
+        if not use_item or use_item.data(Qt.UserRole) is None:
+            # This is a mod header row, not a file
+            return
+        
+        file_path_str = use_item.data(Qt.UserRole)
+        if not file_path_str:
+            return
+        
+        file_path = Path(file_path_str)
+        
+        # Update file preview tab
+        self._preview_xml_file(file_path)
+    
+    def _on_invalid_file_selected(self):
+        """Handle selection change in invalid files table."""
+        selected_rows = self.tbl_invalid_sources.selectedItems()
+        if not selected_rows:
+            return
+        
+        row = self.tbl_invalid_sources.currentRow()
+        path_item = self.tbl_invalid_sources.item(row, 3)
+        
+        if not path_item:
+            return
+        
+        file_path = Path(path_item.text())
+        
+        # Preview as text (not XML)
+        self._preview_text_file(file_path)
+    
+    def _preview_xml_file(self, file_path: Path):
+        """Preview a file as XML."""
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            
+            self.lbl_file_name.setText(f"📄 {file_path.name}")
+            
+            # Detect config type using model + forgiving parsing for fragments
+            try:
+                _, root, model_class = XMLMergeHelper.parse_xml_file(file_path)
+                entry_count = len([c for c in list(root) if isinstance(c.tag, str)])
 
-        targets_layout.addWidget(self.tbl_targets)
-        tables_row.addWidget(targets_group, stretch=2)
+                if model_class:
+                    mergeable_fields = XMLMergeHelper.get_mergeable_fields(model_class)
+                    merge_strategy = model_class.get_merge_strategy()
+                    type_info = (
+                        f"{tr('mission_merge.file_preview_type')}: {model_class.__name__} | "
+                        f"{tr('mission_merge.file_preview_strategy')}: {self._strategy_label(merge_strategy)}"
+                    )
+                    if mergeable_fields:
+                        type_info += (
+                            f" | {tr('mission_merge.file_preview_mergeable')}: "
+                            f"{', '.join(mergeable_fields)}"
+                        )
+                    self.lbl_file_entries.setText(f"{tr('mission_merge.entries')}: {entry_count} | {type_info}")
+                else:
+                    self.lbl_file_entries.setText(
+                        f"{tr('mission_merge.entries')}: {entry_count} | {tr('mission_merge.file_preview_type')}: {tr('mission_merge.file_preview_unknown_type')}"
+                    )
+            except Exception:
+                self.lbl_file_entries.setText(f"{tr('mission_merge.entries')}: ?")
+            
+            self.txt_file_preview.setText(content)
+            self.lbl_file_preview_info.setText(str(file_path))
+            
+            # Switch to file preview tab
+            self.tabs.setCurrentIndex(1)
+            
+        except Exception as e:
+            self.txt_file_preview.setText(
+                tr("mission_merge.file_preview_error_loading").format(error=str(e))
+            )
+    
+    def _preview_text_file(self, file_path: Path):
+        """Preview a file as plain text (for invalid XML files)."""
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
 
-        layout.addLayout(tables_row)
+            self.lbl_file_name.setText(
+                tr("mission_merge.file_preview_invalid_title").format(name=file_path.name)
+            )
+            self.lbl_file_entries.setText(
+                tr("mission_merge.file_preview_size").format(size=file_path.stat().st_size)
+            )
+            
+            self.txt_file_preview.setText(content)
+            self.lbl_file_preview_info.setText(str(file_path))
+            
+            # Switch to file preview tab
+            self.tabs.setCurrentIndex(1)
+            
+        except Exception as e:
+            self.txt_file_preview.setText(
+                tr("mission_merge.file_preview_error_loading").format(error=str(e))
+            )
+    
+    def _count_valid_entries(self, file_path: Path) -> int:
+        """Count entries with valid mergeable data."""
+        try:
+            _, root, model_class = XMLMergeHelper.parse_xml_file(file_path)
+            count = 0
+            
+            for child in root:
+                if not isinstance(child.tag, str) or not child.tag.strip():
+                    continue
+                
+                if model_class:
+                    # Use model's entry key attribute
+                    entry_key_attr = model_class.get_entry_key_attribute() if hasattr(model_class, 'get_entry_key_attribute') else "name"
+                    if entry_key_attr and child.get(entry_key_attr):
+                        count += 1
+                    elif len(list(child)) > 0:  # Has children
+                        count += 1
+                else:
+                    # Fallback to generic check
+                    if child.get("name") or child.get("type") or child.get("id") or len(list(child)) > 0:
+                        count += 1
+            return count
+        except:
+            return 0
+    
+    def _is_file_valid_for_merge(self, file_path: Path) -> tuple[bool, str, Optional[Type]]:
+        """Check if a file has valid data for merging.
         
-        # Preview tabs (bottom)
-        preview_group = QGroupBox(tr("mission_merge.preview_title"))
-        preview_layout = QVBoxLayout(preview_group)
+        Returns: (is_valid, reason, model_class)
+        """
+        try:
+            _, root, model_class = XMLMergeHelper.parse_xml_file(file_path)
+            
+            # Check if root has children
+            children = [c for c in root if isinstance(c.tag, str)]
+            if not children:
+                return False, tr("mission_merge.no_valid_entries"), model_class
+            
+            # Check if any child has identifiable attributes
+            valid_count = 0
+            for child in children:
+                if model_class:
+                    entry_key_attr = model_class.get_entry_key_attribute() if hasattr(model_class, 'get_entry_key_attribute') else None
+                    if entry_key_attr and child.get(entry_key_attr):
+                        valid_count += 1
+                    elif len(list(child)) > 0:
+                        valid_count += 1
+                else:
+                    if child.get("name") or child.get("type") or child.get("id") or len(list(child)) > 0:
+                        valid_count += 1
+            
+            if valid_count == 0:
+                return False, tr("mission_merge.no_identifiable_entries"), model_class
+            
+            return True, "", model_class
+        except ET.ParseError as e:
+            return False, f"{tr('mission_merge.xml_parse_error')}: {str(e)}", None
+        except Exception as e:
+            return False, str(e), None
+
+    def _strategy_label(self, strategy: MergeStrategy) -> str:
+        mapping = {
+            MergeStrategy.REPLACE: tr("mission_merge.strategy_replace"),
+            MergeStrategy.MERGE_CHILDREN: tr("mission_merge.strategy_merge_children"),
+            MergeStrategy.APPEND: tr("mission_merge.strategy_append"),
+            MergeStrategy.SKIP: tr("mission_merge.strategy_skip"),
+        }
+        return mapping.get(strategy, getattr(strategy, "name", str(strategy)))
+    
+    def _get_merge_suggestion(self, file_path: Path, model_class: Optional[Type]) -> tuple[str, str]:
+        """Get merge suggestion based on model.
         
-        self.tabs = QTabWidget()
+        Returns: (action, suggested_target)
+        """
+        if not model_class:
+            # Unknown type - suggest copy
+            return "copy", file_path.name
         
-        # Overview tab
-        overview_tab = self._create_overview_tab()
-        self.tabs.addTab(overview_tab, tr("mission_merge.tab_overview"))
+        # Get merge strategy from model
+        merge_strategy = model_class.get_merge_strategy()
         
-        # Entries tab  
-        entries_tab = self._create_entries_tab()
-        self.tabs.addTab(entries_tab, tr("mission_merge.tab_entries"))
+        # Get target filename
+        root_element = model_class.get_root_element()
         
-        # Preview XML tab
-        preview_tab = self._create_xml_preview_tab()
-        self.tabs.addTab(preview_tab, tr("mission_merge.tab_preview"))
+        # Find matching target file
+        suggested_target = file_path.name
         
-        preview_layout.addWidget(self.tabs)
-        layout.addWidget(preview_group, stretch=1)
+        # Map model to standard DayZ filenames
+        model_to_filename = {
+            TypesXMLModel: "types.xml",
+            SpawnableTypesXMLModel: "cfgspawnabletypes.xml",
+            RandomPresetsXMLModel: "cfgrandompresets.xml",
+            EventsXMLModel: "events.xml",
+            EventSpawnsXMLModel: "cfgeventspawns.xml",
+            IgnoreListXMLModel: "cfgignorelist.xml",
+            WeatherXMLModel: "cfgweather.xml",
+            EconomyCoreXMLModel: "cfgeconomycore.xml",
+            EnvironmentXMLModel: "cfgenvironment.xml",
+            MapGroupXMLModel: file_path.name,  # Keep original name for map files
+            MapProtoXMLModel: file_path.name,
+        }
         
+        if model_class in model_to_filename:
+            suggested_target = model_to_filename[model_class]
+        
+        # Determine action based on merge strategy
+        if merge_strategy == MergeStrategy.REPLACE:
+            return "merge", suggested_target
+        elif merge_strategy == MergeStrategy.MERGE_CHILDREN:
+            return "merge", suggested_target
+        elif merge_strategy == MergeStrategy.APPEND:
+            return "merge", suggested_target
+        else:
+            return "copy", suggested_target
+
+    def _get_expected_target(self, model_class: Optional[Type]) -> Optional[str]:
+        """Get the expected target filename for a model class."""
+        if not model_class:
+            return None
+        model_to_filename = {
+            TypesXMLModel: "types.xml",
+            SpawnableTypesXMLModel: "cfgspawnabletypes.xml",
+            RandomPresetsXMLModel: "cfgrandompresets.xml",
+            EventsXMLModel: "events.xml",
+            EventSpawnsXMLModel: "cfgeventspawns.xml",
+            IgnoreListXMLModel: "cfgignorelist.xml",
+            WeatherXMLModel: "cfgweather.xml",
+            EconomyCoreXMLModel: "cfgeconomycore.xml",
+            EnvironmentXMLModel: "cfgenvironment.xml",
+            # MapGroup and MapProto don't have fixed targets
+        }
+        return model_to_filename.get(model_class)
+
     def _create_overview_tab(self) -> QWidget:
         """Create overview tab showing summary by file."""
         widget = QWidget()
@@ -568,17 +913,27 @@ class MissionConfigMergeDialog(QDialog):
         """Scan all mods for config files."""
         self.tbl_sources.setRowCount(0)
         self.tbl_targets.setRowCount(0)
+        self.tbl_invalid_sources.setRowCount(0)
         self.merger.load_skipped_mods(self.skipped_mods)
         
         progress = QProgressDialog(
-            tr("mission_merge.scanning"), tr("common.cancel"), 0, 0, self
+            tr("mission_merge.scanning"), tr("common.cancel"), 0, 100, self
         )
         progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
         progress.show()
+        QApplication.processEvents()
         
         mod_infos = []
         try:
-            mod_infos = self.merger.scan_all_mods()
+            progress.setValue(10)
+            QApplication.processEvents()
+            # Scan all XML files (including unknown parent class)
+            mod_infos = self.merger.scan_all_mods(scan_all_xml=True)
+            progress.setValue(80)
+            QApplication.processEvents()
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -587,6 +942,8 @@ class MissionConfigMergeDialog(QDialog):
             )
             return
         finally:
+            progress.setValue(100)
+            QApplication.processEvents()
             progress.close()
 
         self._populate_targets_table()
@@ -658,20 +1015,16 @@ class MissionConfigMergeDialog(QDialog):
         for name in known + [n for n in existing if n not in known]:
             targets.append(name)
 
-        from xml.etree import ElementTree as ET
-
         self._available_targets = targets
         self.tbl_targets.setRowCount(0)
         for filename in targets:
             file_path = self.mission_path / filename
             exists = file_path.exists()
-            parent = ConfigFileType.from_filename(filename).root_element or "-"
             entries = "-"
             if exists:
                 try:
                     tree = ET.parse(file_path)
                     root = tree.getroot()
-                    parent = root.tag
                     entries = str(len(list(root)))
                 except Exception:
                     entries = "?"
@@ -679,114 +1032,207 @@ class MissionConfigMergeDialog(QDialog):
             row = self.tbl_targets.rowCount()
             self.tbl_targets.insertRow(row)
             self.tbl_targets.setItem(row, 0, QTableWidgetItem(filename))
-            self.tbl_targets.setItem(row, 1, QTableWidgetItem(parent))
-            self.tbl_targets.setItem(row, 2, QTableWidgetItem("✓" if exists else "-"))
-            self.tbl_targets.setItem(row, 3, QTableWidgetItem(entries))
-            self.tbl_targets.setItem(row, 4, QTableWidgetItem(str(file_path)))
+            self.tbl_targets.setItem(row, 1, QTableWidgetItem("✓" if exists else "-"))
+            self.tbl_targets.setItem(row, 2, QTableWidgetItem(entries))
+            self.tbl_targets.setItem(row, 3, QTableWidgetItem(str(file_path)))
 
     def _populate_sources_table(self, mod_infos: list[ModConfigInfo]):
-        """Populate left table with source XML files from mods."""
-        from xml.etree import ElementTree as ET
-
+        """Populate left tables with source XML files from mods - split into valid/invalid."""
         self._scanned_mod_infos = mod_infos
         self.tbl_sources.setRowCount(0)
+        self.tbl_invalid_sources.setRowCount(0)
+        
+        valid_count = 0
+        invalid_count = 0
 
         for mod_info in mod_infos:
-            # Add mod header row
-            header_row = self.tbl_sources.rowCount()
-            self.tbl_sources.insertRow(header_row)
+            # Separate files into valid and invalid
+            valid_files = []
+            invalid_files = []
             
-            # Mod header spans all columns
-            mod_header = QTableWidgetItem(f"📦 {mod_info.mod_name}")
-            mod_header.setFont(QFont("", -1, QFont.Bold))
-            mod_header.setBackground(QColor("#3a3a3a"))
-            mod_header.setForeground(QColor("#4fc3f7"))
-            mod_header.setFlags(Qt.ItemIsEnabled)  # Not selectable
-            self.tbl_sources.setItem(header_row, 0, mod_header)
-            self.tbl_sources.setSpan(header_row, 0, 1, 7)  # Span all columns
-            
-            # Add config files for this mod
             for config_file in mod_info.config_files:
-                file_type = ConfigFileType.from_filename(config_file.name)
-                entries_count = 0
-                parent_tag = file_type.root_element or "-"
-                try:
-                    tree = ET.parse(config_file)
-                    root = tree.getroot()
-                    parent_tag = root.tag
-                    file_type = ConfigFileType.from_root_element(root.tag)
-                    entries_count = len(list(root))
-                except Exception:
-                    # Leave inferred from filename; mark manual in status later
-                    pass
-
-                row = self.tbl_sources.rowCount()
-                self.tbl_sources.insertRow(row)
-                
-                # Use checkbox
-                use_item = QTableWidgetItem("")
-                use_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
-                use_item.setCheckState(Qt.Checked)
-                use_item.setData(Qt.UserRole, str(config_file))
-                use_item.setData(Qt.UserRole + 1, mod_info.mod_name)
-                use_item.setData(Qt.UserRole + 2, file_type.name)
-                self.tbl_sources.setItem(row, 0, use_item)
-                
-                # File name - bold
-                file_item = QTableWidgetItem(config_file.name)
-                file_font = file_item.font()
-                file_font.setBold(True)
-                file_item.setFont(file_font)
-                self.tbl_sources.setItem(row, 1, file_item)
-                
-                # Parent and entries
-                self.tbl_sources.setItem(row, 2, QTableWidgetItem(parent_tag))
-                self.tbl_sources.setItem(row, 3, QTableWidgetItem(str(entries_count)))
-
-                # Action combo
-                action_combo = QComboBox()
-                action_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-                action_combo.setMinimumWidth(160)
-                action_combo.addItem(tr("mission_merge.action_copy"), userData="copy")
-                action_combo.addItem(tr("mission_merge.action_merge"), userData="merge")
-
-                # Default: merge when known type, else copy
-                if file_type == ConfigFileType.UNKNOWN:
-                    action_combo.setCurrentIndex(0)
+                is_valid_file, invalid_reason, model_class = self._is_file_valid_for_merge(config_file)
+                if is_valid_file:
+                    valid_files.append((config_file, model_class))
                 else:
-                    action_combo.setCurrentIndex(1)
-                self.tbl_sources.setCellWidget(row, 4, action_combo)
-
-                # Target combo
-                target_combo = QComboBox()
-                target_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-                target_combo.setMinimumWidth(200)
-                for t in getattr(self, "_available_targets", []):
-                    target_combo.addItem(t, userData=t)
-                default_target = (
-                    get_base_config_filename(config_file.name)
-                    if is_map_specific_file(config_file.name)
-                    else (file_type.filename or config_file.name)
-                )
-                idx = target_combo.findData(default_target)
-                if idx >= 0:
-                    target_combo.setCurrentIndex(idx)
-                self.tbl_sources.setCellWidget(row, 5, target_combo)
-
-                # Status
-                status_item = QTableWidgetItem(tr("mission_merge.status_ok"))
-                status_item.setForeground(QColor("#607d8b"))
-                self.tbl_sources.setItem(row, 6, status_item)
-
-                def _on_change(_=None, r=row):
-                    self._on_source_row_changed(r)
-
-                action_combo.currentIndexChanged.connect(_on_change)
-                target_combo.currentIndexChanged.connect(_on_change)
-
-                self._on_source_row_changed(row)
-
+                    invalid_files.append((config_file, invalid_reason))
+            
+            # Add valid files to main table
+            if valid_files:
+                # Add mod header row
+                header_row = self.tbl_sources.rowCount()
+                self.tbl_sources.insertRow(header_row)
+                
+                mod_header = QTableWidgetItem(f"📦 {mod_info.mod_name}")
+                mod_header.setFont(QFont("", -1, QFont.Bold))
+                mod_header.setBackground(QColor("#3a3a3a"))
+                mod_header.setForeground(QColor("#4fc3f7"))
+                mod_header.setFlags(Qt.ItemIsEnabled)
+                self.tbl_sources.setItem(header_row, 0, mod_header)
+                self.tbl_sources.setSpan(header_row, 0, 1, 7)
+                
+                for config_file, model_class in valid_files:
+                    self._add_valid_file_row(config_file, mod_info.mod_name, model_class)
+                    valid_count += 1
+            
+            # Add invalid files to invalid table
+            for config_file, reason in invalid_files:
+                self._add_invalid_file_row(config_file, mod_info.mod_name, reason)
+                invalid_count += 1
+        
+        # Update tab titles with counts
+        self.source_tabs.setTabText(0, f"{tr('mission_merge.tab_valid_files')} ({valid_count})")
+        self.source_tabs.setTabText(1, f"{tr('mission_merge.tab_invalid_files')} ({invalid_count})")
+        
         self._update_new_files_count()
+    
+    def _add_valid_file_row(self, config_file: Path, mod_name: str, model_class: Optional[Type]):
+        """Add a valid file row to the sources table."""
+        entries_count = 0
+        config_type_name = "Unknown"
+        parse_meta: dict = {}
+        detected_model = model_class
+        
+        try:
+            _, root, detected_model, parse_meta = XMLMergeHelper.parse_xml_file_with_meta(
+                config_file, model_hint=model_class
+            )
+            entries_count = self._count_valid_entries(config_file)
+
+            # Get type from model
+            if detected_model:
+                config_type_name = detected_model.__name__.replace("XMLModel", "")
+            else:
+                # Fallback to ConfigFileType
+                file_type = ConfigFileType.from_root_element(root.tag)
+                config_type_name = file_type.name if file_type != ConfigFileType.UNKNOWN else root.tag
+        except Exception:
+            # Keep defaults
+            detected_model = model_class
+        
+        # Get merge suggestion from model
+        action, suggested_target = self._get_merge_suggestion(config_file, model_class)
+        
+        row = self.tbl_sources.rowCount()
+        self.tbl_sources.insertRow(row)
+        
+        # Checkbox
+        use_item = QTableWidgetItem("")
+        use_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+        use_item.setCheckState(Qt.Checked)
+        use_item.setData(Qt.UserRole, str(config_file))
+        use_item.setData(Qt.UserRole + 1, mod_name)
+        use_item.setData(Qt.UserRole + 2, config_type_name)
+        use_item.setData(Qt.UserRole + 3, True)  # Valid
+        use_item.setData(Qt.UserRole + 4, model_class)  # Store model class
+        self.tbl_sources.setItem(row, 0, use_item)
+        
+        # File name
+        file_item = QTableWidgetItem(config_file.name)
+        file_font = file_item.font()
+        file_font.setBold(True)
+        file_item.setFont(file_font)
+
+        # Warning icon for files that required recovery/unwrapping (hard to scan/detect)
+        try:
+            is_hard = bool(
+                parse_meta.get("has_tag_in_comment")
+                or parse_meta.get("unwrap_comments")
+                or parse_meta.get("used_extract_entries")
+                or parse_meta.get("has_preamble")
+                or parse_meta.get("has_postamble")
+                or parse_meta.get("has_c_style_comments")
+                or parse_meta.get("has_slashslash_comments")
+            )
+            if is_hard:
+                file_item.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxWarning))
+                file_item.setToolTip(tr("mission_merge.hard_to_scan_warning"))
+        except Exception:
+            pass
+        self.tbl_sources.setItem(row, 1, file_item)
+        
+        # Config type (from model)
+        type_item = QTableWidgetItem(config_type_name)
+        if detected_model:
+            type_item.setForeground(QColor("#4caf50"))
+            merge_strategy = detected_model.get_merge_strategy()
+            extra = ""
+            try:
+                if parse_meta and (
+                    parse_meta.get("has_tag_in_comment")
+                    or parse_meta.get("unwrap_comments")
+                    or parse_meta.get("used_extract_entries")
+                ):
+                    extra = f"\n\n{tr('mission_merge.hard_to_scan_warning')}"
+            except Exception:
+                extra = ""
+            type_item.setToolTip(f"Model: {detected_model.__name__}\nStrategy: {merge_strategy.name}{extra}")
+        else:
+            type_item.setForeground(QColor("#ff9800"))
+        self.tbl_sources.setItem(row, 2, type_item)
+        
+        # Entries count
+        entries_item = QTableWidgetItem(str(entries_count))
+        if entries_count == 0:
+            entries_item.setForeground(QColor("#ff5252"))
+        self.tbl_sources.setItem(row, 3, entries_item)
+        
+        # Action combo
+        action_combo = QComboBox()
+        action_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        action_combo.addItem(tr("mission_merge.action_copy"), userData="copy")
+        action_combo.addItem(tr("mission_merge.action_merge"), userData="merge")
+        action_combo.setCurrentIndex(1 if action == "merge" else 0)
+        self.tbl_sources.setCellWidget(row, 4, action_combo)
+        
+        # Target combo
+        target_combo = QComboBox()
+        target_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        for t in getattr(self, "_available_targets", []):
+            target_combo.addItem(t, userData=t)
+        
+        # Set suggested target
+        idx = target_combo.findData(suggested_target)
+        if idx >= 0:
+            target_combo.setCurrentIndex(idx)
+        self.tbl_sources.setCellWidget(row, 5, target_combo)
+        
+        # Status
+        status_item = QTableWidgetItem(tr("mission_merge.status_ok"))
+        status_item.setForeground(QColor("#607d8b"))
+        self.tbl_sources.setItem(row, 6, status_item)
+        
+        def _on_change(_=None, r=row):
+            self._on_source_row_changed(r)
+        
+        action_combo.currentIndexChanged.connect(_on_change)
+        target_combo.currentIndexChanged.connect(_on_change)
+        self._on_source_row_changed(row)
+    
+    def _add_invalid_file_row(self, config_file: Path, mod_name: str, reason: str):
+        """Add an invalid file row to the invalid sources table."""
+        row = self.tbl_invalid_sources.rowCount()
+        self.tbl_invalid_sources.insertRow(row)
+        
+        # File name
+        file_item = QTableWidgetItem(config_file.name)
+        file_item.setForeground(QColor("#ff5252"))
+        self.tbl_invalid_sources.setItem(row, 0, file_item)
+        
+        # Mod name
+        mod_item = QTableWidgetItem(mod_name)
+        self.tbl_invalid_sources.setItem(row, 1, mod_item)
+        
+        # Reason
+        reason_item = QTableWidgetItem(reason[:80] + "..." if len(reason) > 80 else reason)
+        reason_item.setForeground(QColor("#ff9800"))
+        reason_item.setToolTip(reason)
+        self.tbl_invalid_sources.setItem(row, 2, reason_item)
+        
+        # Full path
+        path_item = QTableWidgetItem(str(config_file))
+        path_item.setForeground(QColor("#888"))
+        self.tbl_invalid_sources.setItem(row, 3, path_item)
 
     def _on_source_row_changed(self, row: int):
         """Handle action/target changes for a row: enable/disable target and update status."""
@@ -803,40 +1249,35 @@ class MissionConfigMergeDialog(QDialog):
         action = action_combo.currentData()
         target_combo.setEnabled(action == "merge")
 
-        # Validation: parent class mismatch (types/events/etc.)
-        file_type_name = use_item.data(Qt.UserRole + 2) or "UNKNOWN"
-        try:
-            source_type = ConfigFileType[file_type_name]
-        except Exception:
-            source_type = ConfigFileType.UNKNOWN
+        # Get model class for source file
+        model_class = use_item.data(Qt.UserRole + 4)
+        config_type_name = use_item.data(Qt.UserRole + 2) or "Unknown"
         target_file = target_combo.currentData()
 
-        # Source parent tag displayed in column 2 (actual root when readable)
-        source_parent = (self.tbl_sources.item(row, 2).text() if self.tbl_sources.item(row, 2) else "").strip()
-        target_parent = self._get_target_parent_tag(str(target_file)) if target_file else ""
-
         if action == "merge":
-            if source_type == ConfigFileType.UNKNOWN:
+            if model_class:
+                # Check if selected target matches expected model target
+                expected_target = self._get_expected_target(model_class)
+                if expected_target and target_file and target_file.lower() != expected_target.lower():
+                    # Wrong target selected
+                    status_item.setText(tr("mission_merge.status_type_mismatch").format(expected=expected_target))
+                    status_item.setForeground(QColor("#f44336"))
+                else:
+                    # Good merge
+                    merge_strategy = model_class.get_merge_strategy()
+                    status_item.setText(f"✓ {self._strategy_label(merge_strategy)}")
+                    status_item.setForeground(QColor("#4caf50"))
+            elif config_type_name == "Unknown":
                 status_item.setText(tr("mission_merge.status_unknown_type"))
                 status_item.setForeground(QColor("#ff9800"))
             else:
-                if source_parent and target_parent and source_parent.lower() != target_parent.lower():
-                    status_item.setText(
-                        tr("mission_merge.status_type_mismatch").format(
-                            source=source_parent,
-                            target=target_parent,
-                        )
-                    )
-                    status_item.setForeground(QColor("#ff9800"))
-                else:
-                    status_item.setText(tr("mission_merge.status_ok"))
-                    status_item.setForeground(QColor("#607d8b"))
+                status_item.setText(tr("mission_merge.status_ok"))
+                status_item.setForeground(QColor("#607d8b"))
         else:
             status_item.setText(tr("mission_merge.status_copy"))
             status_item.setForeground(QColor("#2196f3"))
 
         self._update_new_files_count()
-        self._refresh_mapping_warnings()
         self._refresh_mapping_warnings()
 
     def _refresh_mapping_warnings(self):
@@ -864,12 +1305,11 @@ class MissionConfigMergeDialog(QDialog):
             )
         else:
             self.lbl_mapping_warnings.setText("")
-    
+
     def _generate_preview(self):
         """Generate merge preview for selected mods."""
         # Mapping warnings are informational only (mods can be non-standard).
         self._refresh_mapping_warnings()
-        # Always allow continuing without prompting.
 
         # Collect selected rows
         selected_by_mod: dict[str, list[Path]] = {}
@@ -1122,7 +1562,11 @@ class MissionConfigMergeDialog(QDialog):
         if filename and self.preview:
             if filename.startswith("new:"):
                 # New file - show file path
-                self.txt_xml_preview.setText(f"New file to copy: {filename[4:]}")
+                self.txt_file_preview.setText(
+                    tr("mission_merge.overview_new_file_to_copy").format(file=filename[4:])
+                )
+                self.lbl_file_name.setText(f"📄 {filename[4:]}")
+                self.lbl_file_entries.setText("")
             elif filename in self.preview.merge_results:
                 result = self.preview.merge_results[filename]
                 
@@ -1130,23 +1574,41 @@ class MissionConfigMergeDialog(QDialog):
                 info += f"{tr('mission_merge.new_entries')}: {result.new_entries}\n"
                 info += f"{tr('mission_merge.duplicates')}: {result.duplicates}\n"
                 info += f"{tr('mission_merge.conflicts')}: {result.conflicts}\n"
-                
-                self.txt_xml_preview.setText(info)
-            self.tabs.setCurrentIndex(2)  # Switch to preview tab
+
+                self.txt_file_preview.setText(info)
+                self.lbl_file_name.setText(f"📄 {filename}")
+                self.lbl_file_entries.setText("")
+
+            # Switch to file preview tab
+            self.tabs.setCurrentIndex(1)
     
     def _on_entry_clicked(self, item, column):
         """Handle click on entry item."""
         if isinstance(item, EntryTreeItem):
             # Show XML preview
             xml_str = item.entry.to_xml_string()
+
+            status_labels = {
+                MergeStatus.NEW: tr("mission_merge.status_new"),
+                MergeStatus.DUPLICATE: tr("mission_merge.status_duplicate"),
+                MergeStatus.CONFLICT: tr("mission_merge.status_conflict"),
+                MergeStatus.SKIPPED: tr("mission_merge.status_skipped"),
+                MergeStatus.MANUAL: tr("mission_merge.status_manual"),
+                MergeStatus.MERGED: tr("mission_merge.status_merged"),
+            }
+            status_text = status_labels.get(item.entry.status, str(getattr(item.entry.status, "value", item.entry.status)))
+
             info = f"<!-- {tr('mission_merge.source')}: {item.entry.source_mod} -->\n"
             info += f"<!-- {tr('mission_merge.file')}: {item.entry.source_file.name} -->\n"
-            info += f"<!-- {tr('mission_merge.status')}: {item.entry.status.value} -->\n\n"
+            info += f"<!-- {tr('mission_merge.status')}: {status_text} -->\n\n"
             info += xml_str
-            
-            self.txt_xml_preview.setText(info)
-            self.lbl_preview_info.setText(f"{item.entry.unique_key}")
-            self.tabs.setCurrentIndex(2)  # Switch to preview tab
+
+            self.txt_file_preview.setText(info)
+            self.lbl_file_name.setText(f"🔎 {tr('mission_merge.entry_preview')}: {item.entry.unique_key}")
+            self.lbl_file_entries.setText(f"{tr('mission_merge.status')}: {status_text}")
+
+            # Switch to file preview tab
+            self.tabs.setCurrentIndex(1)
     
     def _mark_checked_as_processed(self):
         """Mark all checked mods as processed/skipped."""
@@ -1419,21 +1881,39 @@ class ConflictResolverDialog(QDialog):
     
     def _create_conflict_tab(self, filename: str, entries: list) -> QWidget:
         """Create a tab for resolving conflicts in a specific file."""
-        from PySide6.QtWidgets import QSplitter, QListWidget, QListWidgetItem
-        
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
         
-        # Determine file type for merge strategy
-        file_type = ConfigFileType.from_filename(filename)
-        is_mergeable = file_type in [ConfigFileType.RANDOMPRESETS, ConfigFileType.EVENTSPAWNS]  # Files where items can be merged
+        # Determine file type and merge capability using XML models
+        model_class = ConfigTypeRegistry.get_model_by_filename(filename)
+        
+        # Determine if this file type supports merging children
+        is_mergeable = False
+        if model_class:
+            merge_strategy = model_class.get_merge_strategy()
+            is_mergeable = merge_strategy in [MergeStrategy.MERGE_CHILDREN, MergeStrategy.APPEND]
+            
+            # Also check if model has mergeable fields
+            mergeable_fields = XMLMergeHelper.get_mergeable_fields(model_class)
+            if mergeable_fields:
+                is_mergeable = True
+        else:
+            # Fallback to old ConfigFileType check
+            file_type = ConfigFileType.from_filename(filename)
+            is_mergeable = file_type in [ConfigFileType.RANDOMPRESETS, ConfigFileType.EVENTSPAWNS]
         
         info_text = tr("mission_merge.conflict_replace_info") if not is_mergeable else tr("mission_merge.conflict_merge_info")
         info = QLabel(info_text)
         info.setStyleSheet("color: #ff9800; font-size: 11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
+        
+        # Show model info
+        if model_class:
+            model_info = QLabel(f"Model: {model_class.__name__} | Strategy: {model_class.get_merge_strategy().name}")
+            model_info.setStyleSheet("color: #4caf50; font-size: 10px;")
+            layout.addWidget(model_info)
         
         # Group conflicts by unique key
         conflicts_by_key = {}
@@ -1443,8 +1923,8 @@ class ConflictResolverDialog(QDialog):
                 conflicts_by_key[key] = []
             conflicts_by_key[key].append(entry)
         
-        # Create splitter: list of conflicts on left, details on right
-        splitter = QSplitter(Qt.Horizontal)
+        # Main horizontal splitter
+        main_splitter = QSplitter(Qt.Horizontal)
         
         # Left: list of conflict keys
         left_widget = QWidget()
@@ -1459,51 +1939,54 @@ class ConflictResolverDialog(QDialog):
         conflict_list.setAlternatingRowColors(False)
         for key in conflicts_by_key.keys():
             base_label = key.split(":", 1)[-1] if ":" in key else key
-            item = QListWidgetItem(base_label)
+            entry_count = len(conflicts_by_key[key])
+            item = QListWidgetItem(f"{base_label} ({tr('mission_merge.conflict_entry_count', count=entry_count)})")
             item.setData(Qt.UserRole, key)
             item.setData(Qt.UserRole + 1, base_label)
             conflict_list.addItem(item)
         left_layout.addWidget(conflict_list)
-        splitter.addWidget(left_widget)
+        main_splitter.addWidget(left_widget)
         
-        # Right: conflict resolution options
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        # Right: Tab widget for options and result preview
+        right_tabs = QTabWidget()
         
-        right_label = QLabel(tr("mission_merge.resolution_options"))
-        right_label.setStyleSheet("font-weight: bold;")
-        right_layout.addWidget(right_label)
+        # Tab 1: Resolution options
+        options_tab = QWidget()
+        options_layout = QVBoxLayout(options_tab)
+        options_layout.setContentsMargins(4, 4, 4, 4)
         
-        # Options table
+        # Current state label
+        state_label = QLabel(tr("mission_merge.conflict_current_state", state=tr("mission_merge.conflict_state_none")))
+        state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
+        options_layout.addWidget(state_label)
+        
+        # Options table - simplified: no Action column
         options_table = QTableWidget()
-        options_table.setColumnCount(5)
+        options_table.setColumnCount(4)
         options_table.setAlternatingRowColors(False)
         options_table.setHorizontalHeaderLabels([
-            tr("mission_merge.select"),
+            "",  # Checkbox
             tr("mission_merge.source_mod"),
             tr("mission_merge.entry_preview"),
-            tr("mission_merge.action"),
             tr("mission_merge.status"),
         ])
         options_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         options_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         options_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         options_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        options_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         options_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         options_table.verticalHeader().setVisible(False)
-        right_layout.addWidget(options_table)
+        options_layout.addWidget(options_table)
         
-        # Preview text
+        # Entry XML preview
         preview_label = QLabel(tr("mission_merge.xml_preview"))
         preview_label.setStyleSheet("font-weight: bold;")
-        right_layout.addWidget(preview_label)
+        options_layout.addWidget(preview_label)
         
         preview_text = QTextEdit()
         preview_text.setReadOnly(True)
         preview_text.setFont(QFont("Consolas", 10))
-        preview_text.setMaximumHeight(200)
+        preview_text.setMaximumHeight(180)
         preview_text.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
@@ -1511,12 +1994,38 @@ class ConflictResolverDialog(QDialog):
                 border: 1px solid #3c3c3c;
             }
         """)
-        right_layout.addWidget(preview_text)
+        options_layout.addWidget(preview_text)
         
-        splitter.addWidget(right_widget)
-        splitter.setSizes([300, 700])
+        right_tabs.addTab(options_tab, tr("mission_merge.resolution_options"))
         
-        layout.addWidget(splitter)
+        # Tab 2: Result preview
+        result_tab = QWidget()
+        result_layout = QVBoxLayout(result_tab)
+        result_layout.setContentsMargins(4, 4, 4, 4)
+        
+        result_info = QLabel(tr("mission_merge.result_preview_info"))
+        result_info.setStyleSheet("color: gray; font-size: 11px;")
+        result_info.setWordWrap(True)
+        result_layout.addWidget(result_info)
+        
+        result_preview = QTextEdit()
+        result_preview.setReadOnly(True)
+        result_preview.setFont(QFont("Consolas", 10))
+        result_preview.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+        """)
+        result_layout.addWidget(result_preview)
+        
+        right_tabs.addTab(result_tab, tr("mission_merge.result_preview"))
+        
+        main_splitter.addWidget(right_tabs)
+        main_splitter.setSizes([280, 720])
+        
+        layout.addWidget(main_splitter)
         
         # Store data for this tab
         tab_data = {
@@ -1526,6 +2035,8 @@ class ConflictResolverDialog(QDialog):
             "conflict_list": conflict_list,
             "options_table": options_table,
             "preview_text": preview_text,
+            "state_label": state_label,
+            "result_preview": result_preview,
             "resolved_by_key": {},  # {conflict_key: [{entry, action}, ...]}
             "current_key": None,
             "current_entries": [],
@@ -1583,10 +2094,9 @@ class ConflictResolverDialog(QDialog):
             row = options_table.rowCount()
             options_table.insertRow(row)
 
-            # Always use a checkable item for selection.
-            # - mergeable: allow multi-select
-            # - non-mergeable: enforce exactly one selected (radio-like behavior)
-            selected, selected_action = _is_entry_selected(key, entry)
+            # Checkbox for selection - simplified: no action column
+            # Selection logic: 1 selected = replace, multiple selected = merge (if supported)
+            selected, _ = _is_entry_selected(key, entry)
             check_item = QTableWidgetItem("")
             check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
             check_item.setData(Qt.UserRole, entry)
@@ -1606,30 +2116,12 @@ class ConflictResolverDialog(QDialog):
             preview_item.setFlags(preview_item.flags() & ~Qt.ItemIsEditable)
             preview_item.setToolTip(xml_str)
             options_table.setItem(row, 2, preview_item)
-            
-            # Action combo (for mergeable files)
-            if is_mergeable:
-                action_combo = QComboBox()
-                action_combo.addItem(tr("mission_merge.action_replace"), "replace")
-                action_combo.addItem(tr("mission_merge.action_merge_items"), "merge")
-                # Restore last chosen action for this entry if selected
-                idx = action_combo.findData(selected_action)
-                if idx >= 0:
-                    action_combo.setCurrentIndex(idx)
-                options_table.setCellWidget(row, 3, action_combo)
 
-                action_combo.currentIndexChanged.connect(
-                    lambda _=None, td=tab_data, ck=key, e=entry, combo=action_combo: self._on_merge_action_changed(td, ck, e, combo)
-                )
-            else:
-                action_item = QTableWidgetItem(str(tr("mission_merge.action_replace")))
-                action_item.setFlags(action_item.flags() & ~Qt.ItemIsEditable)
-                options_table.setItem(row, 3, action_item)
-
+            # Status
             status_item = QTableWidgetItem(tr("mission_merge.selected") if selected else "")
             status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
             status_item.setForeground(QColor("#4caf50") if selected else QColor("#888"))
-            options_table.setItem(row, 4, status_item)
+            options_table.setItem(row, 3, status_item)
 
         tab_data["_in_change"] = False
 
@@ -1650,6 +2142,9 @@ class ConflictResolverDialog(QDialog):
             options_table.cellClicked.connect(lambda r, c, td=tab_data: self._on_option_cell_clicked(td, r, c))
             tab_data["_handlers_connected"] = True
 
+        # Update state label and result preview
+        self._update_state_label(tab_data)
+        self._update_result_preview(tab_data)
         self._update_status()
 
         # Update the left list item's resolved marker for this key
@@ -1663,6 +2158,7 @@ class ConflictResolverDialog(QDialog):
             return
 
         is_resolved = bool(resolved_by_key.get(conflict_key))
+        entry_count = len(tab_data.get("conflicts_by_key", {}).get(conflict_key, []))
         for i in range(conflict_list.count()):
             it = conflict_list.item(i)
             if not it:
@@ -1670,8 +2166,9 @@ class ConflictResolverDialog(QDialog):
             if it.data(Qt.UserRole) != conflict_key:
                 continue
 
-            base_label = it.data(Qt.UserRole + 1) or it.text().lstrip("✓ ")
-            it.setText(("✓ " if is_resolved else "") + str(base_label))
+            base_label = it.data(Qt.UserRole + 1) or it.text().lstrip("✓ ").split(" (")[0]
+            label_text = f"{base_label} ({tr('mission_merge.conflict_entry_count', count=entry_count)})"
+            it.setText(("✓ " if is_resolved else "") + label_text)
             it.setForeground(QColor("#4caf50") if is_resolved else QColor("#d4d4d4"))
             break
 
@@ -1697,20 +2194,22 @@ class ConflictResolverDialog(QDialog):
         if not entry:
             return
 
+        # Count current selections to determine action
+        selected_count = 0
+        for r in range(options_table.rowCount()):
+            item = options_table.item(r, 0)
+            if item and item.checkState() == Qt.Checked:
+                selected_count += 1
+
         # Update stored selections
         selected_list = list(tab_data["resolved_by_key"].get(conflict_key, []))
 
-        def _get_action_for_row(r: int) -> str:
-            if not is_mergeable:
-                return "replace"
-            action_widget = options_table.cellWidget(r, 3)
-            if isinstance(action_widget, QComboBox):
-                return str(action_widget.currentData() or "replace")
-            return "replace"
-
+        # Determine action based on selection count:
+        # - 1 selection = replace
+        # - multiple selections = merge (if supported), else only keep latest for non-mergeable
         if changed_item.checkState() == Qt.Checked:
             if not is_mergeable:
-                # Radio-like: only one selection allowed for replace-only
+                # Non-mergeable files: only allow ONE selection (radio behavior)
                 tab_data["_in_change"] = True
                 try:
                     for r in range(options_table.rowCount()):
@@ -1727,11 +2226,10 @@ class ConflictResolverDialog(QDialog):
                     "action": "replace",
                 }]
             else:
-                # Mergeable: add to selection (allow multiple)
-                action = _get_action_for_row(row)
-                # Replace any previous selection for the same entry
+                # Mergeable files: allow multi-select
+                # Action is determined by total selection count later
                 selected_list = [s for s in selected_list if s.get("entry") is not entry]
-                selected_list.append({"entry": entry, "action": action})
+                selected_list.append({"entry": entry, "action": "merge"})  # Will be adjusted based on count
                 tab_data["resolved_by_key"][conflict_key] = selected_list
         else:
             # Unchecked -> remove from selection
@@ -1741,20 +2239,134 @@ class ConflictResolverDialog(QDialog):
             else:
                 tab_data["resolved_by_key"].pop(conflict_key, None)
 
+        # Update action based on final selection count for mergeable files
+        self._update_selection_actions(tab_data, conflict_key)
+
         # Update visuals & counters
         self._update_conflict_key_marker(tab_data, conflict_key)
         self._refresh_option_row_visuals(tab_data)
+        self._update_state_label(tab_data)
+        self._update_result_preview(tab_data)
         self._update_status()
+
+    def _update_selection_actions(self, tab_data: dict, conflict_key: str):
+        """Update action (replace/merge) based on selection count."""
+        selections = tab_data["resolved_by_key"].get(conflict_key, [])
+        if not selections:
+            return
+        
+        is_mergeable = tab_data.get("is_mergeable", False)
+        
+        # Determine action based on count:
+        # - 1 selection = replace
+        # - multiple = merge (if supported)
+        if len(selections) == 1:
+            selections[0]["action"] = "replace"
+        elif is_mergeable:
+            for sel in selections:
+                sel["action"] = "merge"
+        else:
+            # Non-mergeable shouldn't have multiple selections,
+            # but just in case, keep only first
+            selections[0]["action"] = "replace"
+            tab_data["resolved_by_key"][conflict_key] = [selections[0]]
+
+    def _update_state_label(self, tab_data: dict):
+        """Update the state label showing current selection status."""
+        state_label = tab_data.get("state_label")
+        if not state_label:
+            return
+        
+        conflict_key = tab_data.get("current_key")
+        if not conflict_key:
+            state_label.setText(tr("mission_merge.conflict_current_state", state=tr("mission_merge.conflict_state_none")))
+            state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
+            return
+        
+        selections = tab_data["resolved_by_key"].get(conflict_key, [])
+        
+        if not selections:
+            state_text = tr("mission_merge.conflict_state_none")
+            state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
+        elif len(selections) == 1:
+            entry = selections[0]["entry"]
+            name = entry.element.get("name") or entry.source_mod
+            state_text = tr("mission_merge.conflict_state_replace", name=name)
+            state_label.setStyleSheet("color: #4caf50; font-weight: bold; padding: 4px; background-color: rgba(76, 175, 80, 0.1);")
+        else:
+            state_text = tr("mission_merge.conflict_state_merge", count=len(selections))
+            state_label.setStyleSheet("color: #2196f3; font-weight: bold; padding: 4px; background-color: rgba(33, 150, 243, 0.1);")
+        
+        state_label.setText(tr("mission_merge.conflict_current_state", state=state_text))
+    
+    def _update_result_preview(self, tab_data: dict):
+        """Update the result preview showing merged/replaced result."""
+        from xml.etree import ElementTree as ET
+        
+        result_preview = tab_data.get("result_preview")
+        if not result_preview:
+            return
+        
+        conflict_key = tab_data.get("current_key")
+        if not conflict_key:
+            result_preview.setText("")
+            return
+        
+        selections = tab_data["resolved_by_key"].get(conflict_key, [])
+        
+        if not selections:
+            result_preview.setText(f"<!-- {tr('mission_merge.conflict_state_none')} -->")
+            return
+        
+        if len(selections) == 1:
+            # Replace: show the selected entry
+            entry = selections[0]["entry"]
+            xml_preview = f"<!-- {tr('mission_merge.conflict_state_replace', name=entry.source_mod)} -->\n\n"
+            xml_preview += entry.to_xml_string()
+            result_preview.setText(xml_preview)
+        else:
+            # Merge: build combined result
+            xml_preview = f"<!-- {tr('mission_merge.conflict_state_merge', count=len(selections))} -->\n"
+            sources = ", ".join([sel["entry"].source_mod for sel in selections])
+            xml_preview += f"<!-- Sources: {sources} -->\n\n"
+            
+            # Get first entry as base
+            first_entry = selections[0]["entry"]
+            parent_tag = first_entry.element.tag
+            parent_attrs = dict(first_entry.element.attrib)
+            
+            # Collect all children with deduplication using XMLMergeHelper
+            all_children = []
+            seen_signatures = set()
+            
+            for sel in selections:
+                entry = sel["entry"]
+                for child in entry.element:
+                    sig = XMLMergeHelper.get_element_signature(child)
+                    if sig not in seen_signatures:
+                        cloned = ET.Element(child.tag, child.attrib)
+                        cloned.text = child.text
+                        cloned.tail = child.tail
+                        for subchild in child:
+                            cloned.append(subchild)
+                        all_children.append(cloned)
+                        seen_signatures.add(sig)
+            
+            # Build merged XML
+            attrs_str = " ".join([f'{k}="{v}"' for k, v in parent_attrs.items()])
+            xml_preview += f"<{parent_tag} {attrs_str}>\n"
+            for child in all_children:
+                child_str = ET.tostring(child, encoding="unicode").strip()
+                xml_preview += f"    {child_str}\n"
+            xml_preview += f"</{parent_tag}>"
+            
+            result_preview.setText(xml_preview)
 
     def _on_option_cell_clicked(self, tab_data: dict, row: int, col: int):
         """Allow selecting an option by clicking anywhere on its row."""
         self._update_entry_preview_from_tabdata(tab_data, row)
 
-        # Don't toggle when clicking the action combobox cell.
-        if tab_data.get("is_mergeable") and col == 3:
-            return
-
-        # Toggle the checkbox when clicking any other cell.
+        # Toggle the checkbox when clicking any cell except checkbox itself
         if col != 0:
             sel_item = tab_data.get("options_table").item(row, 0) if tab_data.get("options_table") else None
             if sel_item:
@@ -1772,7 +2384,8 @@ class ConflictResolverDialog(QDialog):
                 continue
 
             checked = sel_item.checkState() == Qt.Checked
-            status_item = options_table.item(r, 4)
+            # Status is in column 3 now (was 4 with Action column)
+            status_item = options_table.item(r, 3)
             if status_item:
                 status_item.setText(tr("mission_merge.selected") if checked else "")
                 status_item.setForeground(QColor("#4caf50") if checked else QColor("#888"))
@@ -1784,7 +2397,7 @@ class ConflictResolverDialog(QDialog):
                     cell.setBackground(bg)
 
     def _on_merge_action_changed(self, tab_data: dict, conflict_key: str, entry, combo: QComboBox):
-        """Persist action changes for mergeable selections."""
+        """Persist action changes for mergeable selections - DEPRECATED, kept for compatibility."""
         if tab_data.get("_in_change"):
             return
         if not tab_data.get("is_mergeable"):
@@ -2113,3 +2726,575 @@ class ConflictResolverDialog(QDialog):
             return f"{element.tag}:{name}"
         # Fallback to tag only
         return element.tag
+
+class DuplicateFixerDialog(QDialog):
+    """Dialog for finding and fixing duplicate entries in mission config files."""
+    
+    def __init__(self, server_path: Path, mission_template: str,
+                 parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.server_path = server_path
+        self.mission_template = mission_template
+        self.mission_path = get_mission_folder_path(server_path, mission_template)
+        
+        self._duplicates: dict[str, list[dict]] = {}  # filename -> list of duplicate groups
+        
+        self._setup_ui()
+        self.setWindowTitle(tr("mission_merge.duplicate_fixer_title"))
+        self.setMinimumSize(1200, 700)
+        self.resize(1400, 800)
+        
+        # Auto scan on open
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self._scan_duplicates)
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        
+        # Header
+        header = QHBoxLayout()
+        title = QLabel(f"<h2>{tr('mission_merge.duplicate_fixer_title')}</h2>")
+        header.addWidget(title)
+        header.addStretch()
+        
+        self.btn_scan = IconButton("refresh", text=tr("mission_merge.scan"), size=16)
+        self.btn_scan.clicked.connect(self._scan_duplicates)
+        header.addWidget(self.btn_scan)
+        
+        layout.addLayout(header)
+        
+        # Info label
+        self.lbl_info = QLabel(tr("mission_merge.duplicate_fixer_info"))
+        self.lbl_info.setStyleSheet("color: gray; font-size: 11px;")
+        self.lbl_info.setWordWrap(True)
+        layout.addWidget(self.lbl_info)
+        
+        # Mission path info
+        self.lbl_mission = QLabel(f"{tr('mission_merge.mission_folder')}: {self.mission_path}")
+        self.lbl_mission.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(self.lbl_mission)
+        
+        # Main content: file tabs
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs, stretch=1)
+        
+        # Summary bar
+        summary_frame = QFrame()
+        summary_frame.setFrameShape(QFrame.StyledPanel)
+        summary_frame.setStyleSheet("QFrame { background-color: rgba(0,0,0,0.1); padding: 8px; }")
+        
+        summary_layout = QHBoxLayout(summary_frame)
+        
+        self.lbl_files_scanned = QLabel(f"{tr('mission_merge.files_scanned')}: 0")
+        summary_layout.addWidget(self.lbl_files_scanned)
+        
+        summary_layout.addWidget(QLabel("|"))
+        
+        self.lbl_total_duplicates = QLabel(f"{tr('mission_merge.total_duplicates')}: 0")
+        self.lbl_total_duplicates.setStyleSheet("color: #f44336; font-weight: bold;")
+        summary_layout.addWidget(self.lbl_total_duplicates)
+        
+        summary_layout.addStretch()
+        layout.addWidget(summary_frame)
+        
+        # Action buttons
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        
+        self.btn_fix_selected = QPushButton(tr("mission_merge.fix_selected_duplicates"))
+        self.btn_fix_selected.setStyleSheet("background-color: #4caf50; color: white; font-weight: bold;")
+        self.btn_fix_selected.clicked.connect(self._fix_selected_duplicates)
+        self.btn_fix_selected.setEnabled(False)
+        buttons.addWidget(self.btn_fix_selected)
+        
+        self.btn_close = QPushButton(tr("common.close"))
+        self.btn_close.clicked.connect(self.reject)
+        buttons.addWidget(self.btn_close)
+        
+        layout.addLayout(buttons)
+    
+    def _scan_duplicates(self):
+        """Scan mission folder for duplicate entries."""
+        self.tabs.clear()
+        self._duplicates.clear()
+
+        xml_files = [p for p in self.mission_path.glob("*.xml") if p.is_file()]
+        progress = QProgressDialog(
+            tr("mission_merge.scanning_duplicates"), tr("common.cancel"), 0, len(xml_files), self
+        )
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.show()
+        QApplication.processEvents()
+        
+        try:
+            files_with_dups = 0
+            total_dup_groups = 0
+            
+            for i, xml_file in enumerate(xml_files, start=1):
+                if progress.wasCanceled():
+                    break
+
+                progress.setLabelText(
+                    f"{tr('mission_merge.scanning_duplicates')}: {xml_file.name} ({i}/{len(xml_files)})"
+                )
+                progress.setValue(i - 1)
+                QApplication.processEvents()
+                
+                try:
+                    duplicates = self._find_duplicates_in_file(xml_file)
+                    if duplicates:
+                        self._duplicates[xml_file.name] = duplicates
+                        self._create_file_tab(xml_file.name, duplicates)
+                        files_with_dups += 1
+                        total_dup_groups += len(duplicates)
+                except Exception:
+                    pass
+            
+            self.lbl_files_scanned.setText(f"{tr('mission_merge.files_scanned')}: {len(xml_files)}")
+            self.lbl_total_duplicates.setText(f"{tr('mission_merge.total_duplicates')}: {total_dup_groups}")
+            
+            self.btn_fix_selected.setEnabled(total_dup_groups > 0)
+            
+            if total_dup_groups == 0:
+                QMessageBox.information(
+                    self, tr("common.info"),
+                    tr("mission_merge.no_duplicates_found")
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(self, tr("common.error"), str(e))
+        finally:
+            try:
+                progress.setValue(len(xml_files))
+                QApplication.processEvents()
+            except Exception:
+                pass
+            progress.close()
+    
+    def _find_duplicates_in_file(self, file_path: Path) -> list[dict]:
+        """Find duplicate entries in a single XML file.
+
+        NOTE: Some file types (notably mapgroup*) legitimately repeat the same `name`
+        many times at different positions. For those we must dedupe by a stronger
+        signature (e.g., name+pos), otherwise everything becomes a false duplicate.
+        """
+        # Use robust parsing for potentially malformed XML
+        try:
+            _tree, root, model = XMLMergeHelper.parse_xml_file(file_path)
+        except Exception:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            model = ConfigTypeRegistry.get_model_by_root_element(str(getattr(root, "tag", "") or ""))
+
+        # cfgspawnabletypes.xml: allow repeated <type name="..."> as separate loot options.
+        # Do not flag duplicates for this file.
+        try:
+            if (model is SpawnableTypesXMLModel) or (
+                isinstance(getattr(root, "tag", None), str) and str(root.tag).lower() == "spawnabletypes"
+            ):
+                return []
+        except Exception:
+            pass
+
+        # If the model has no repeating entry element, duplicates-by-entry don't apply.
+        entry_tag: Optional[str] = None
+        if model is not None:
+            try:
+                entry_tag = model.get_entry_element()
+            except Exception:
+                entry_tag = None
+
+        all_children = list(root)
+
+        # Track first-seen occurrences without storing everything. Only materialize
+        # a list when we actually encounter a duplicate key.
+        first_seen: dict[str, tuple[int, ET.Element]] = {}
+        duplicates_by_key: dict[str, list[tuple[int, ET.Element]]] = {}
+
+        for i, child in enumerate(all_children):
+            if not isinstance(child.tag, str):
+                continue
+
+            # If we know the entry tag, only consider those elements.
+            if entry_tag and child.tag.lower() != entry_tag.lower():
+                continue
+
+            key = XMLMergeHelper.get_element_signature(child, model)
+            if not key:
+                continue
+
+            if key in duplicates_by_key:
+                duplicates_by_key[key].append((i, child))
+                continue
+
+            if key in first_seen:
+                first = first_seen.pop(key)
+                duplicates_by_key[key] = [first, (i, child)]
+            else:
+                first_seen[key] = (i, child)
+
+        def _label_for(elem: ET.Element, fallback: str) -> str:
+            try:
+                if str(elem.tag).lower() == "group":
+                    name = elem.get("name", "")
+                    pos = elem.get("pos", "")
+                    if name and pos:
+                        return f"{name} @ {pos}"
+                    if name:
+                        return name
+            except Exception:
+                pass
+            name = elem.get("name")
+            if name:
+                return name
+            return fallback
+
+        duplicates: list[dict] = []
+        for key, entries in duplicates_by_key.items():
+            if len(entries) <= 1:
+                continue
+            label = _label_for(entries[0][1], key)
+            duplicates.append({
+                "key": key,
+                "label": label,
+                "entries": entries,
+                "file_path": file_path,
+            })
+
+        # Stable ordering for UI
+        duplicates.sort(key=lambda d: (d.get("label") or "", d.get("key") or ""))
+        return duplicates
+    
+    def _create_file_tab(self, filename: str, duplicates: list[dict]):
+        """Create a tab for fixing duplicates in a specific file."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Info
+        info = QLabel(tr("mission_merge.duplicate_select_to_keep"))
+        info.setStyleSheet("color: #ff9800; font-size: 11px;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        
+        # Splitter: list on left, preview on right
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Left: list of duplicate groups
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        left_label = QLabel(f"{tr('mission_merge.duplicate_entries')} ({len(duplicates)})")
+        left_label.setStyleSheet("font-weight: bold;")
+        left_layout.addWidget(left_label)
+        
+        dup_list = QListWidget()
+        dup_list.setAlternatingRowColors(False)
+        for i, dup_group in enumerate(duplicates):
+            name = dup_group.get("label") or dup_group.get("key") or "(unknown)"
+            count = len(dup_group["entries"])
+            item = QListWidgetItem(f"{name} ({count} entries)")
+            item.setData(Qt.UserRole, i)
+            item.setForeground(QColor("#f44336"))
+            dup_list.addItem(item)
+        left_layout.addWidget(dup_list)
+        splitter.addWidget(left_widget)
+        
+        # Right: entry selection and preview
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        right_label = QLabel(tr("mission_merge.select_entry_to_keep"))
+        right_label.setStyleSheet("font-weight: bold;")
+        right_layout.addWidget(right_label)
+        
+        # Options table
+        options_table = QTableWidget()
+        options_table.setColumnCount(4)
+        options_table.setAlternatingRowColors(False)
+        options_table.setHorizontalHeaderLabels([
+            tr("mission_merge.keep"),
+            tr("mission_merge.index"),
+            tr("mission_merge.entry_preview"),
+            tr("mission_merge.source"),
+        ])
+        options_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        options_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        options_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        options_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        options_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        options_table.verticalHeader().setVisible(False)
+        right_layout.addWidget(options_table, stretch=1)
+        
+        # Preview
+        preview_label = QLabel(tr("mission_merge.xml_preview"))
+        preview_label.setStyleSheet("font-weight: bold;")
+        right_layout.addWidget(preview_label)
+        
+        preview_text = QTextEdit()
+        preview_text.setReadOnly(True)
+        preview_text.setFont(QFont("Consolas", 9))
+        preview_text.setMaximumHeight(200)
+        preview_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+        """)
+        right_layout.addWidget(preview_text)
+        
+        splitter.addWidget(right_widget)
+        splitter.setSizes([300, 700])
+        
+        layout.addWidget(splitter)
+        
+        # Store tab data
+        tab_data = {
+            "filename": filename,
+            "duplicates": duplicates,
+            "dup_list": dup_list,
+            "options_table": options_table,
+            "preview_text": preview_text,
+            "selections": {},  # {dup_index: selected_entry_index}
+        }
+        widget._tab_data = tab_data
+        
+        # Connect signals
+        dup_list.currentItemChanged.connect(
+            lambda curr, prev, td=tab_data: self._on_duplicate_selected(td, curr)
+        )
+        
+        options_table.itemChanged.connect(
+            lambda item, td=tab_data: self._on_keep_selection_changed(td, item)
+        )
+        
+        options_table.cellClicked.connect(
+            lambda r, c, td=tab_data: self._on_option_row_clicked(td, r)
+        )
+        
+        self.tabs.addTab(widget, f"{filename} ({len(duplicates)})")
+        
+        # Select first item
+        if dup_list.count() > 0:
+            dup_list.setCurrentRow(0)
+    
+    def _on_duplicate_selected(self, tab_data: dict, item):
+        """Handle duplicate group selection."""
+        if not item:
+            return
+        
+        dup_index = item.data(Qt.UserRole)
+        duplicates = tab_data["duplicates"]
+        options_table = tab_data["options_table"]
+        preview_text = tab_data["preview_text"]
+        
+        if dup_index >= len(duplicates):
+            return
+        
+        dup_group = duplicates[dup_index]
+        entries = dup_group["entries"]
+        
+        # Clear and populate options table
+        options_table.setRowCount(0)
+        tab_data["_current_dup_index"] = dup_index
+        
+        # Get previously selected entry for this group (default to first)
+        selected_idx = tab_data["selections"].get(dup_index, 0)
+        
+        for i, (entry_idx, element) in enumerate(entries):
+            row = options_table.rowCount()
+            options_table.insertRow(row)
+            
+            # Keep checkbox (radio-like behavior)
+            keep_item = QTableWidgetItem("")
+            keep_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+            keep_item.setCheckState(Qt.Checked if i == selected_idx else Qt.Unchecked)
+            keep_item.setData(Qt.UserRole, i)
+            options_table.setItem(row, 0, keep_item)
+            
+            # Index
+            idx_item = QTableWidgetItem(f"#{entry_idx}")
+            idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable)
+            options_table.setItem(row, 1, idx_item)
+            
+            # Preview
+            xml_str = ET.tostring(element, encoding="unicode")
+            preview = xml_str[:80] + "..." if len(xml_str) > 80 else xml_str
+            preview_item = QTableWidgetItem(preview.replace("\n", " "))
+            preview_item.setFlags(preview_item.flags() & ~Qt.ItemIsEditable)
+            preview_item.setToolTip(xml_str)
+            options_table.setItem(row, 2, preview_item)
+            
+            # Source info
+            source_item = QTableWidgetItem(f"Entry {i+1}/{len(entries)}")
+            source_item.setFlags(source_item.flags() & ~Qt.ItemIsEditable)
+            options_table.setItem(row, 3, source_item)
+        
+        # Show preview of first entry
+        if entries:
+            title = dup_group.get("label") or dup_group.get("key") or "(unknown)"
+            xml_preview = f"<!-- Duplicate entry: {title} -->\n"
+            xml_preview += f"<!-- {len(entries)} occurrences found -->\n\n"
+            xml_preview += ET.tostring(entries[0][1], encoding="unicode")
+            preview_text.setText(xml_preview)
+    
+    def _on_keep_selection_changed(self, tab_data: dict, changed_item: QTableWidgetItem):
+        """Handle keep checkbox change (enforce single selection)."""
+        if not changed_item or changed_item.column() != 0:
+            return
+        
+        options_table = tab_data["options_table"]
+        dup_index = tab_data.get("_current_dup_index")
+        
+        if changed_item.checkState() == Qt.Checked:
+            entry_idx = changed_item.data(Qt.UserRole)
+            
+            # Uncheck all other items
+            for r in range(options_table.rowCount()):
+                item = options_table.item(r, 0)
+                if item and item.data(Qt.UserRole) != entry_idx:
+                    item.setCheckState(Qt.Unchecked)
+            
+            # Store selection
+            if dup_index is not None:
+                tab_data["selections"][dup_index] = entry_idx
+                
+                # Update list item to show resolved
+                dup_list = tab_data["dup_list"]
+                for i in range(dup_list.count()):
+                    it = dup_list.item(i)
+                    if it and it.data(Qt.UserRole) == dup_index:
+                        it.setForeground(QColor("#4caf50"))
+                        break
+    
+    def _on_option_row_clicked(self, tab_data: dict, row: int):
+        """Select entry when clicking anywhere on the row."""
+        options_table = tab_data["options_table"]
+        preview_text = tab_data["preview_text"]
+        dup_index = tab_data.get("_current_dup_index")
+        
+        if dup_index is None:
+            return
+        
+        duplicates = tab_data["duplicates"]
+        if dup_index >= len(duplicates):
+            return
+        
+        dup_group = duplicates[dup_index]
+        entries = dup_group["entries"]
+        
+        if row < len(entries):
+            # Update preview
+            title = dup_group.get("label") or dup_group.get("key") or "(unknown)"
+            xml_preview = f"<!-- Duplicate entry: {title} -->\n"
+            xml_preview += f"<!-- Entry {row+1}/{len(entries)} -->\n\n"
+            xml_preview += ET.tostring(entries[row][1], encoding="unicode")
+            preview_text.setText(xml_preview)
+            
+            # Toggle selection
+            item = options_table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.Checked)
+    
+    def _fix_selected_duplicates(self):
+        """Apply fixes for selected duplicates."""
+        # Collect all selections
+        fixes_by_file: dict[str, list[dict]] = {}
+        
+        for i in range(self.tabs.count()):
+            tab = self.tabs.widget(i)
+            tab_data = getattr(tab, "_tab_data", None)
+            if not tab_data:
+                continue
+            
+            filename = tab_data["filename"]
+            duplicates = tab_data["duplicates"]
+            selections = tab_data["selections"]
+            
+            for dup_idx, dup_group in enumerate(duplicates):
+                selected_entry_idx = selections.get(dup_idx, 0)
+                fixes_by_file.setdefault(filename, []).append({
+                    "name": dup_group["name"],
+                    "entries": dup_group["entries"],
+                    "keep_index": selected_entry_idx,
+                    "file_path": dup_group["file_path"],
+                })
+        
+        if not fixes_by_file:
+            QMessageBox.warning(self, tr("common.warning"), tr("mission_merge.no_fixes_selected"))
+            return
+        
+        # Count total fixes
+        total_fixes = sum(len(fixes) for fixes in fixes_by_file.values())
+        
+        # Confirm
+        reply = QMessageBox.question(
+            self, tr("common.confirm"),
+            tr("mission_merge.confirm_fix_duplicates").format(count=total_fixes),
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            fixed_count = 0
+            
+            for filename, fixes in fixes_by_file.items():
+                file_path = self.mission_path / filename
+                
+                if not file_path.exists():
+                    continue
+
+                # Parse (robust first)
+                try:
+                    tree, root, _model = XMLMergeHelper.parse_xml_file(file_path)
+                except Exception:
+                    tree = ET.parse(file_path)
+                    root = tree.getroot()
+                
+                # Build list of elements to remove (indices to remove, keeping selected)
+                indices_to_remove = []
+                
+                for fix in fixes:
+                    entries = fix["entries"]
+                    keep_idx = fix["keep_index"]
+                    
+                    for i, (entry_idx, element) in enumerate(entries):
+                        if i != keep_idx:
+                            indices_to_remove.append(entry_idx)
+                
+                # Remove elements (in reverse order to preserve indices)
+                indices_to_remove.sort(reverse=True)
+                
+                all_children = list(root)
+                for idx in indices_to_remove:
+                    if 0 <= idx < len(all_children):
+                        root.remove(all_children[idx])
+                        fixed_count += 1
+                
+                # Save
+                try:
+                    ET.indent(tree, space="    ")
+                except AttributeError:
+                    pass
+                
+                tree.write(file_path, encoding="utf-8", xml_declaration=True)
+            
+            QMessageBox.information(
+                self, tr("common.success"),
+                tr("mission_merge.duplicates_fixed").format(count=fixed_count)
+            )
+            
+            # Rescan
+            self._scan_duplicates()
+            
+        except Exception as e:
+            QMessageBox.critical(self, tr("common.error"), str(e))
