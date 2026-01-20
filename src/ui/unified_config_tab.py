@@ -975,6 +975,7 @@ goto start
             title_key="launcher.load_installed_mods_title",
             info_key="launcher.load_installed_mods_info",
             auto_sort_on_open=True,
+            server_path=server_path,
         )
         if dialog.exec() == QDialog.Accepted:
             selected_mods = dialog.get_sorted_mods()
@@ -1008,7 +1009,14 @@ goto start
             QMessageBox.information(self, tr("common.info"), tr("launcher.no_mods_to_sort"))
             return
         
-        dialog = ModSortDialog(mods_list, self)
+        # Get server_path for dependency management
+        server_path = None
+        if self.current_profile:
+            server_path = Path(self.current_profile.get("server_path", ""))
+            if not server_path.exists():
+                server_path = None
+        
+        dialog = ModSortDialog(mods_list, self, server_path=server_path)
         if dialog.exec() == QDialog.Accepted:
             sorted_mods = dialog.get_sorted_mods()
             mods_str = self._format_mods_list(sorted_mods)

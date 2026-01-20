@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor
 
 from src.ui.widgets import IconButton
 from src.ui.theme_manager import ThemeManager
+from src.ui.dialogs.mod_sort_dialog import ModSortDialog
 from src.utils.locale_manager import tr
 from src.core.default_restore import default_start_bat_template
 
@@ -515,7 +516,14 @@ goto start
             QMessageBox.information(self, tr("common.info"), tr("launcher.no_mods_to_sort"))
             return
         
-        dialog = ModSortDialog(mods_list, self)
+        # Get server_path for dependency management
+        server_path = None
+        if self.current_profile:
+            server_path = Path(self.current_profile.get("server_path", ""))
+            if not server_path.exists():
+                server_path = None
+        
+        dialog = ModSortDialog(mods_list, self, server_path=server_path)
         if dialog.exec() == QDialog.Accepted:
             sorted_mods = dialog.get_sorted_mods()
             mods_str = self._format_mods_list(sorted_mods)
@@ -609,122 +617,3 @@ goto start
             self.btn_sort_mods.setText(tr("launcher.sort_mods"))
         if hasattr(self, 'btn_save_mods_file'):
             self.btn_save_mods_file.setText(tr("launcher.save_mods_file"))
-
-
-class ModSortDialog(QDialog):
-    """Dialog for manually sorting mod load order with drag-drop and up/down buttons."""
-    
-    def __init__(self, mods_list: list, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(tr("launcher.sort_mods_title"))
-        self.setMinimumSize(500, 450)
-        self.setModal(True)
-        
-        self._setup_ui(mods_list)
-    
-    def _setup_ui(self, mods_list: list):
-        layout = QVBoxLayout(self)
-        
-        # Instructions
-        info_label = QLabel(tr("launcher.sort_mods_info"))
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: gray; padding: 5px;")
-        layout.addWidget(info_label)
-        
-        # Main content area
-        content_layout = QHBoxLayout()
-        
-        # Mods list with drag-drop
-        self.mods_list = QListWidget()
-        self.mods_list.setDragDropMode(QAbstractItemView.InternalMove)
-        self.mods_list.setDefaultDropAction(Qt.MoveAction)
-        self.mods_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        
-        # Add items with priority indicators
-        for mod in mods_list:
-            item = QListWidgetItem(mod)
-            priority = get_mod_priority(mod)
-            if priority < len(MOD_PRIORITY_KEYWORDS):
-                # Core/Framework mod - highlight
-                item.setForeground(QColor("#4CAF50"))  # Green for priority mods
-                item.setToolTip(tr("launcher.priority_mod"))
-            self.mods_list.addItem(item)
-        
-        content_layout.addWidget(self.mods_list, stretch=1)
-        
-        # Buttons for up/down/auto-sort
-        btn_layout = QVBoxLayout()
-        btn_layout.addStretch()
-        
-        self.btn_up = IconButton("arrow_up", icon_only=True, size=18)
-        self.btn_up.setFixedWidth(40)
-        self.btn_up.setToolTip(tr("launcher.move_up"))
-        self.btn_up.clicked.connect(self._move_up)
-        btn_layout.addWidget(self.btn_up)
-        
-        self.btn_down = IconButton("arrow_down", icon_only=True, size=18)
-        self.btn_down.setFixedWidth(40)
-        self.btn_down.setToolTip(tr("launcher.move_down"))
-        self.btn_down.clicked.connect(self._move_down)
-        btn_layout.addWidget(self.btn_down)
-        
-        btn_layout.addSpacing(20)
-        
-        self.btn_auto_sort = IconButton("sort", icon_only=True, size=18)
-        self.btn_auto_sort.setFixedWidth(40)
-        self.btn_auto_sort.setToolTip(tr("launcher.auto_sort"))
-        self.btn_auto_sort.clicked.connect(self._auto_sort)
-        btn_layout.addWidget(self.btn_auto_sort)
-        
-        btn_layout.addStretch()
-        content_layout.addLayout(btn_layout)
-        
-        layout.addLayout(content_layout)
-        
-        # Legend
-        legend_layout = QHBoxLayout()
-        legend_label = QLabel(tr('launcher.priority_legend'))
-        legend_label.setStyleSheet("color: #4CAF50; font-size: 11px;")
-        legend_layout.addWidget(legend_label)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-        
-        # Dialog buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-    
-    def _move_up(self):
-        """Move selected item up."""
-        row = self.mods_list.currentRow()
-        if row > 0:
-            item = self.mods_list.takeItem(row)
-            self.mods_list.insertItem(row - 1, item)
-            self.mods_list.setCurrentRow(row - 1)
-    
-    def _move_down(self):
-        """Move selected item down."""
-        row = self.mods_list.currentRow()
-        if row < self.mods_list.count() - 1:
-            item = self.mods_list.takeItem(row)
-            self.mods_list.insertItem(row + 1, item)
-            self.mods_list.setCurrentRow(row + 1)
-    
-    def _auto_sort(self):
-        """Auto-sort mods by priority (core/framework first)."""
-        mods = [self.mods_list.item(i).text() for i in range(self.mods_list.count())]
-        mods.sort(key=lambda x: (get_mod_priority(x), x.lower()))
-        
-        self.mods_list.clear()
-        for mod in mods:
-            item = QListWidgetItem(mod)
-            priority = get_mod_priority(mod)
-            if priority < len(MOD_PRIORITY_KEYWORDS):
-                item.setForeground(QColor("#4CAF50"))
-                item.setToolTip(tr("launcher.priority_mod"))
-            self.mods_list.addItem(item)
-    
-    def get_sorted_mods(self) -> list:
-        """Return the mods in their current order."""
-        return [self.mods_list.item(i).text() for i in range(self.mods_list.count())]

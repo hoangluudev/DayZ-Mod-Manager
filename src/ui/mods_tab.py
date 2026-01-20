@@ -17,6 +17,7 @@ from src.core.mod_integrity import ModIntegrityChecker
 from src.core.profile_manager import ProfileManager
 from src.core.settings_manager import SettingsManager
 from src.core.mod_worker import ModWorker
+from src.core.mod_name_manager import ModNameManager
 from src.ui.icons import Icons
 from src.ui.widgets.icon_button import IconButton
 from src.ui.base import BaseTab
@@ -129,6 +130,16 @@ class ModsTab(BaseTab):
         actions.addWidget(self.btn_deselect_all_ws)
         
         actions.addStretch()
+        
+        # Optimize mod names checkbox
+        from PySide6.QtWidgets import QCheckBox
+        self.chk_optimize_names = QCheckBox(tr("mods.optimize_names"))
+        self.chk_optimize_names.setToolTip(tr("mods.optimize_names_tooltip"))
+        self.chk_optimize_names.setChecked(False)
+        actions.addWidget(self.chk_optimize_names)
+        
+        actions.addWidget(QLabel("|"))
+        
         self.lbl_ws_count = QLabel("0 mods")
         self.lbl_ws_count.setStyleSheet(f"color: {ThemeManager.get_accent_color()};")
         actions.addWidget(self.lbl_ws_count)
@@ -173,6 +184,11 @@ class ModsTab(BaseTab):
         self.btn_copy_all_bikeys.clicked.connect(self._copy_all_bikeys)
         self.btn_copy_all_bikeys.setEnabled(False)  # Enable when mods without bikeys exist
         actions.addWidget(self.btn_copy_all_bikeys)
+
+        self.btn_optimize_installed = IconButton("sort", text=tr("mods.optimize_installed"), size=18)
+        self.btn_optimize_installed.setToolTip(tr("mods.optimize_installed_tooltip"))
+        self.btn_optimize_installed.clicked.connect(self._optimize_installed_mods)
+        actions.addWidget(self.btn_optimize_installed)
         
         self.btn_select_all_inst = QPushButton(tr("common.select_all"))
         self.btn_select_all_inst.clicked.connect(self._select_all_installed)
@@ -256,12 +272,23 @@ class ModsTab(BaseTab):
             self.worker.wait(250)
 
         self.current_profile = profile_data
-        self.lbl_no_profile.setVisible(False)
-        self.content_widget.setVisible(True)
-        
+
+        has_profile = bool(profile_data)
+        self.lbl_no_profile.setVisible(not has_profile)
+        self.content_widget.setVisible(has_profile)
+        if not has_profile:
+            self.workshop_table.setRowCount(0)
+            self.installed_table.setRowCount(0)
+            self._workshop_items = []
+            self._installed_items = []
+            self._update_ws_count()
+            self._update_inst_count()
+            self.lbl_workshop_path.setText("")
+            self.lbl_server_path.setText("")
+            return
+
         self.lbl_workshop_path.setText(profile_data.get("workshop_path", "") or "")
         self.lbl_server_path.setText(profile_data.get("server_path", "") or "")
-        
         self._refresh_all()
     
     def _refresh_all(self):
@@ -386,6 +413,12 @@ class ModsTab(BaseTab):
             
             # Use utility function
             self._installed_items = scan_installed_mods(server_path)
+
+            name_manager = None
+            try:
+                name_manager = ModNameManager(server_path)
+            except Exception:
+                name_manager = None
             
             # Build workshop dates map for comparison (to highlight outdated mods)
             workshop_dates = {}
@@ -397,7 +430,7 @@ class ModsTab(BaseTab):
             # Populate table
             self.installed_table.setRowCount(len(self._installed_items))
             for row, (mod_folder, version, size, has_bikey, mod_bikeys, install_date) in enumerate(self._installed_items):
-                self._populate_installed_row(row, mod_folder, version, size, has_bikey, mod_bikeys, install_date, workshop_dates)
+                self._populate_installed_row(row, mod_folder, version, size, has_bikey, mod_bikeys, install_date, workshop_dates, name_manager)
             
             self._update_inst_count()
             self._maybe_initialize_mods_txt()
@@ -406,11 +439,12 @@ class ModsTab(BaseTab):
     
     def _populate_installed_row(self, row: int, mod_folder: str, version: str,
                                 size: int, has_bikey: bool, mod_bikeys: list,
-                                install_date, workshop_dates: dict):
+                                install_date, workshop_dates: dict, name_manager: ModNameManager | None):
         """Populate a single installed table row."""
         # Check if this mod has an update in workshop (workshop date > server install date)
+        original_folder = name_manager.get_original_name(mod_folder) if name_manager else mod_folder
         has_update = False
-        workshop_date = workshop_dates.get(mod_folder.lower())
+        workshop_date = workshop_dates.get(original_folder.lower())
         if workshop_date and install_date:
             has_update = workshop_date > install_date
         
@@ -422,8 +456,10 @@ class ModsTab(BaseTab):
         self.installed_table.setItem(row, InstalledColumns.CHECK, check_item)
         
         # Name
-        name_item = QTableWidgetItem(mod_folder)
+        name_item = QTableWidgetItem(original_folder)
         name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+        if original_folder != mod_folder:
+            name_item.setToolTip(f"{original_folder}\n({tr('mods.folder')}: {mod_folder})")
         if has_update:
             name_item.setForeground(QColor("#ff9800"))  # Orange for outdated
             name_item.setToolTip(tr("mods.update_available_tooltip"))
@@ -614,8 +650,36 @@ class ModsTab(BaseTab):
             return
         
         server_path = Path(self.current_profile.get("server_path", ""))
-        new_mods = [(wid, mf) for wid, mf in mods if not (server_path / mf).exists()]
-        existing_mods = [(wid, mf) for wid, mf in mods if (server_path / mf).exists()]
+
+        name_manager = None
+        try:
+            if server_path.exists():
+                name_manager = ModNameManager(server_path)
+        except Exception:
+            name_manager = None
+
+        new_mods: list[tuple[str, str]] = []
+        existing_mods: list[tuple[str, str]] = []
+        for wid, mf in mods:
+            # Direct match (non-optimized installs)
+            if (server_path / mf).exists():
+                existing_mods.append((wid, mf))
+                continue
+
+            # Optimized installs: look up mapped @mN either by mod_id or by original name
+            mapped_folder = None
+            if name_manager:
+                mapping_key = wid
+                if wid == "local":
+                    mapping_key = f"local:{str(mf).lower()}"
+                mapped_folder = name_manager.get_shortened_name_by_mod_id(mapping_key) or name_manager.find_existing_m_short_for_original(mf)
+
+            if mapped_folder and (server_path / mapped_folder).exists():
+                existing_mods.append((wid, mf))
+                continue
+
+            new_mods.append((wid, mf))
+        
         
         if existing_mods and not new_mods:
             if self.confirm_dialog(f"{len(existing_mods)} mod(s) {tr('mods.already_installed')}.\n{tr('mods.overwrite_existing')}?"):
@@ -667,16 +731,25 @@ class ModsTab(BaseTab):
         
         update_mods = []
         not_found = []
+
+        server_path = Path(self.current_profile.get("server_path", ""))
+        name_manager = None
+        try:
+            if server_path.exists():
+                name_manager = ModNameManager(server_path)
+        except Exception:
+            name_manager = None
         
         for mod_folder in mods:
             found = False
+            original_folder = name_manager.get_original_name(mod_folder) if name_manager else mod_folder
             for workshop_id, ws_folder, _, _, _ in self._workshop_items:
-                if ws_folder.lower() == mod_folder.lower():
+                if ws_folder.lower() == original_folder.lower():
                     update_mods.append((workshop_id, ws_folder))
                     found = True
                     break
             if not found:
-                not_found.append(mod_folder)
+                not_found.append(original_folder)
         
         if not_found:
             QMessageBox.warning(self, tr("common.warning"),
@@ -684,6 +757,21 @@ class ModsTab(BaseTab):
         
         if update_mods:
             self._run_operation("update", update_mods)
+
+    def _optimize_installed_mods(self):
+        """Optimize already-installed mod folder names into @mN scheme."""
+        if not self.current_profile:
+            return
+
+        server_path_str = self.current_profile.get("server_path", "")
+        if not server_path_str:
+            return
+
+        if not self.confirm_dialog(tr("mods.optimize_installed_confirm")):
+            return
+
+        # Worker scans server folder; no explicit mods list needed.
+        self._run_operation("optimize_installed", [], copy_bikeys=False)
     
     def _run_operation(self, operation: str, mods: list, copy_bikeys: bool = None):
         if self.worker and self.worker.isRunning():
@@ -713,12 +801,20 @@ class ModsTab(BaseTab):
         self.btn_add_selected.setEnabled(False)
         self.btn_remove_selected.setEnabled(False)
         
+        # Check if name optimization is enabled
+        optimize_names = False
+        if operation in ("add", "update") and hasattr(self, 'chk_optimize_names'):
+            optimize_names = self.chk_optimize_names.isChecked()
+        if operation == "optimize_installed":
+            optimize_names = True
+        
         self.worker = ModWorker(
             operation=operation,
             server_path=self.current_profile.get("server_path", ""),
             workshop_path=self.current_profile.get("workshop_path", ""),
             mods=mods,
-            copy_bikeys=copy_bikeys
+            copy_bikeys=copy_bikeys,
+            optimize_names=optimize_names
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_operation_finished)
