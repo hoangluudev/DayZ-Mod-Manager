@@ -537,6 +537,8 @@
 
         "targets": "Mission Target Files",
         "exists": "Exists",
+        "planned_changes": "Planned changes",
+        "planned_mods": "Mods (planned)",
 
         "col_use": "Use",
         "col_mod": "Mod",
@@ -643,6 +645,7 @@
         "fix_selected_duplicates": "Fix Selected Duplicates",
         "no_fixes_selected": "No duplicate fixes selected.",
         "confirm_fix_duplicates": "Remove {count} duplicate entries from mission config files?",
+        "confirm_fix_duplicates_detailed": "Remove {entries} duplicate entries across {groups} groups ({files} file(s))?",
         "duplicates_fixed": "Successfully removed {count} duplicate entries.",
         
         "conflict_entry_count": "{count} entries",
@@ -650,6 +653,14 @@
         "conflict_state_none": "None selected",
         "conflict_state_replace": "Replace with '{name}'",
         "conflict_state_merge": "Merge {count} entries",
+        "auto_pick_file": "Auto select",
+        "auto_pick_file_tooltip": "Bulk auto-select: resolve groups where all options are identical",
+        "auto_pick_not_applicable": "Auto select is only available when all options are identical.",
+        "auto_pick_applied": "Auto selected {count} groups.",
+        "auto_pick_applied_details": "Auto selected {groups} groups ({entries} duplicate entries).",
+        "auto_pick_summary": "Auto selected: {groups} groups / {entries} entries",
+        "remaining_count": "Remaining: {remaining}/{total}",
+        "remaining_groups": "Remaining groups: {remaining}",
         "result_preview": "Result Preview",
         "result_preview_info": "Preview of the merged/replaced entry after applying the current selection:"
     }

@@ -439,11 +439,14 @@ class MissionConfigMergeDialog(QDialog):
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        self.tbl_targets = QTableWidget(0, 4)
+        # Columns: file, exists, current entries, planned changes, planned mods, path
+        self.tbl_targets = QTableWidget(0, 6)
         self.tbl_targets.setHorizontalHeaderLabels([
             tr("mission_merge.target_file"),
             tr("mission_merge.exists"),
             tr("mission_merge.entries"),
+            tr("mission_merge.planned_changes"),
+            tr("mission_merge.planned_mods"),
             tr("mission_merge.col_path"),
         ])
         self.tbl_targets.setAlternatingRowColors(False)
@@ -452,7 +455,9 @@ class MissionConfigMergeDialog(QDialog):
         self.tbl_targets.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.tbl_targets.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.tbl_targets.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.tbl_targets.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.tbl_targets.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
         self.tbl_targets.setColumnWidth(0, 200)
         self.tbl_targets.verticalHeader().setVisible(False)
         self.tbl_targets.verticalHeader().setDefaultSectionSize(28)
@@ -1034,7 +1039,98 @@ class MissionConfigMergeDialog(QDialog):
             self.tbl_targets.setItem(row, 0, QTableWidgetItem(filename))
             self.tbl_targets.setItem(row, 1, QTableWidgetItem("✓" if exists else "-"))
             self.tbl_targets.setItem(row, 2, QTableWidgetItem(entries))
-            self.tbl_targets.setItem(row, 3, QTableWidgetItem(str(file_path)))
+            self.tbl_targets.setItem(row, 3, QTableWidgetItem("-"))
+            self.tbl_targets.setItem(row, 4, QTableWidgetItem("-"))
+            self.tbl_targets.setItem(row, 5, QTableWidgetItem(str(file_path)))
+
+        self._update_targets_table_preview()
+
+    def _update_targets_table_preview(self):
+        """Update planned changes/mods columns based on the current preview selections."""
+        if not hasattr(self, "tbl_targets"):
+            return
+
+        preview = getattr(self, "preview", None)
+        resolved_map = getattr(preview, "resolved_conflicts", None) if preview else None
+        resolved_map = resolved_map or {}
+
+        def _resolved_keys_for_file(filename: str) -> set[str]:
+            keys: set[str] = set()
+            for res in resolved_map.get(filename, []) or []:
+                if not isinstance(res, dict):
+                    continue
+                entry = res.get("entry")
+                if entry is not None and getattr(entry, "unique_key", None):
+                    keys.add(str(entry.unique_key))
+            return keys
+
+        def _remaining_conflict_count(filename: str, result) -> int:
+            resolved_keys = _resolved_keys_for_file(filename)
+            if not resolved_keys:
+                return int(getattr(result, "conflicts", 0) or 0)
+
+            by_key: dict[str, int] = {}
+            for e in getattr(result, "conflict_entries", []) or []:
+                k = str(getattr(e, "unique_key", ""))
+                if not k:
+                    continue
+                by_key[k] = by_key.get(k, 0) + 1
+
+            resolved_entries = sum(by_key.get(k, 0) for k in resolved_keys)
+            return max(0, int(getattr(result, "conflicts", 0) or 0) - int(resolved_entries))
+
+        include_conflicts = bool(getattr(self, "chk_include_conflicts", None) and self.chk_include_conflicts.isChecked())
+
+        for row in range(self.tbl_targets.rowCount()):
+            filename_item = self.tbl_targets.item(row, 0)
+            if not filename_item:
+                continue
+            filename = filename_item.text()
+
+            planned_changes = "-"
+            planned_mods = "-"
+
+            if preview and filename in getattr(preview, "merge_results", {}):
+                result = preview.merge_results.get(filename)
+                new_count = len(getattr(result, "merged_entries", []) or [])
+                resolved_for_file = (resolved_map.get(filename, []) or [])
+                resolved_count = len([r for r in resolved_for_file if isinstance(r, dict) and r.get("entry") is not None])
+                extra_conflicts = _remaining_conflict_count(filename, result) if include_conflicts else 0
+                planned_changes = str(new_count + resolved_count + extra_conflicts)
+
+                mods: set[str] = set()
+                for e in getattr(result, "merged_entries", []) or []:
+                    m = str(getattr(e, "source_mod", "") or "")
+                    if m:
+                        mods.add(m)
+                for r in resolved_for_file:
+                    if not isinstance(r, dict):
+                        continue
+                    e = r.get("entry")
+                    if e is None:
+                        continue
+                    m = str(getattr(e, "source_mod", "") or "")
+                    if m:
+                        mods.add(m)
+                if include_conflicts:
+                    resolved_keys = _resolved_keys_for_file(filename)
+                    for e in getattr(result, "conflict_entries", []) or []:
+                        if str(getattr(e, "unique_key", "")) in resolved_keys:
+                            continue
+                        m = str(getattr(e, "source_mod", "") or "")
+                        if m:
+                            mods.add(m)
+
+                mods_list = sorted(mods)
+                if not mods_list:
+                    planned_mods = "-"
+                elif len(mods_list) <= 3:
+                    planned_mods = ", ".join(mods_list)
+                else:
+                    planned_mods = ", ".join(mods_list[:3]) + f" (+{len(mods_list) - 3} {tr('common.more')})"
+
+            self.tbl_targets.setItem(row, 3, QTableWidgetItem(planned_changes))
+            self.tbl_targets.setItem(row, 4, QTableWidgetItem(planned_mods))
 
     def _populate_sources_table(self, mod_infos: list[ModConfigInfo]):
         """Populate left tables with source XML files from mods - split into valid/invalid."""
@@ -1481,6 +1577,9 @@ class MissionConfigMergeDialog(QDialog):
         
         # Update entries tree
         self._populate_entries_tree()
+
+        # Update targets tab with planned changes grouped by mod
+        self._update_targets_table_preview()
     
     def _populate_entries_tree(self):
         """Populate entries tree grouped by file."""
@@ -1514,7 +1613,8 @@ class MissionConfigMergeDialog(QDialog):
             
             resolved_keys = _resolved_keys_for_file(filename)
 
-            # Add entries
+            # Add entries grouped by mod (marker)
+            mod_groups: dict[str, QTreeWidgetItem] = {}
             all_entries = result.merged_entries + result.conflict_entries
             for entry in all_entries:
                 display_entry = entry
@@ -1533,14 +1633,34 @@ class MissionConfigMergeDialog(QDialog):
                     continue
                 if entry.status == MergeStatus.CONFLICT and not show_conflict:
                     continue
-                    
+
+                mod_name = str(getattr(display_entry, "source_mod", "") or "")
+                if not mod_name:
+                    mod_name = "(unknown)"
+
+                mod_item = mod_groups.get(mod_name)
+                if mod_item is None:
+                    mod_item = QTreeWidgetItem()
+                    mod_item.setText(0, f"📦 {mod_name}")
+                    mod_item.setFont(0, QFont("", -1, QFont.Bold))
+                    mod_item.setForeground(0, QColor("#4fc3f7"))
+                    file_item.addChild(mod_item)
+                    mod_groups[mod_name] = mod_item
+
                 entry_item = EntryTreeItem(display_entry)
-                file_item.addChild(entry_item)
+                mod_item.addChild(entry_item)
                 count += 1
                 
             if count > 0:
                 self.tree_entries.addTopLevelItem(file_item)
                 file_item.setExpanded(True)
+
+                # Expand mod groups for quick scanning
+                for mi in mod_groups.values():
+                    try:
+                        mi.setExpanded(True)
+                    except Exception:
+                        pass
     
     def _filter_entries(self):
         """Re-filter entries based on checkboxes."""
@@ -1956,9 +2076,21 @@ class ConflictResolverDialog(QDialog):
         options_layout.setContentsMargins(4, 4, 4, 4)
         
         # Current state label
+        state_row = QHBoxLayout()
+
         state_label = QLabel(tr("mission_merge.conflict_current_state", state=tr("mission_merge.conflict_state_none")))
         state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
-        options_layout.addWidget(state_label)
+        state_row.addWidget(state_label, stretch=1)
+
+        btn_auto_pick = QPushButton(tr("mission_merge.auto_pick_file"))
+        btn_auto_pick.setToolTip(tr("mission_merge.auto_pick_file_tooltip"))
+        state_row.addWidget(btn_auto_pick)
+
+        options_layout.addLayout(state_row)
+
+        remaining_label = QLabel("")
+        remaining_label.setStyleSheet("color: gray; font-size: 11px;")
+        options_layout.addWidget(remaining_label)
         
         # Options table - simplified: no Action column
         options_table = QTableWidget()
@@ -2036,6 +2168,8 @@ class ConflictResolverDialog(QDialog):
             "options_table": options_table,
             "preview_text": preview_text,
             "state_label": state_label,
+            "remaining_label": remaining_label,
+            "btn_auto_pick": btn_auto_pick,
             "result_preview": result_preview,
             "resolved_by_key": {},  # {conflict_key: [{entry, action}, ...]}
             "current_key": None,
@@ -2052,6 +2186,8 @@ class ConflictResolverDialog(QDialog):
         conflict_list.currentItemChanged.connect(
             lambda curr, prev, td=tab_data: self._on_conflict_selected(td, curr)
         )
+
+        btn_auto_pick.clicked.connect(lambda _=False, td=tab_data: self._auto_pick_file_conflicts(td))
         
         # Select first item and trigger selection
         if conflict_list.count() > 0:
@@ -2076,6 +2212,8 @@ class ConflictResolverDialog(QDialog):
 
         tab_data["current_key"] = key
         tab_data["current_entries"] = entries
+
+        # NOTE: Auto-pick is a bulk per-file action via the button.
         
         # Completely clear the table
         while options_table.rowCount() > 0:
@@ -2145,10 +2283,43 @@ class ConflictResolverDialog(QDialog):
         # Update state label and result preview
         self._update_state_label(tab_data)
         self._update_result_preview(tab_data)
+        self._update_remaining_label(tab_data)
         self._update_status()
 
         # Update the left list item's resolved marker for this key
         self._update_conflict_key_marker(tab_data, key)
+
+        try:
+            options_table.viewport().update()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _deep_signature(elem: ET.Element):
+        """Compute a stable deep signature for an XML element.
+
+        Used to detect truly identical duplicates (including children) regardless
+        of formatting/indentation.
+        """
+        try:
+            tag = str(elem.tag)
+        except Exception:
+            tag = ""
+        try:
+            attrib = tuple(sorted((elem.attrib or {}).items()))
+        except Exception:
+            attrib = ()
+        try:
+            text = (elem.text or "").strip()
+        except Exception:
+            text = ""
+        children = []
+        try:
+            for ch in list(elem):
+                children.append(ConflictResolverDialog._deep_signature(ch))
+        except Exception:
+            children = []
+        return (tag, attrib, text, tuple(children))
 
     def _update_conflict_key_marker(self, tab_data: dict, conflict_key: str):
         """Mark the selected conflict key in the left list as resolved/unresolved."""
@@ -2247,6 +2418,7 @@ class ConflictResolverDialog(QDialog):
         self._refresh_option_row_visuals(tab_data)
         self._update_state_label(tab_data)
         self._update_result_preview(tab_data)
+        self._update_remaining_label(tab_data)
         self._update_status()
 
     def _update_selection_actions(self, tab_data: dict, conflict_key: str):
@@ -2298,6 +2470,71 @@ class ConflictResolverDialog(QDialog):
             state_label.setStyleSheet("color: #2196f3; font-weight: bold; padding: 4px; background-color: rgba(33, 150, 243, 0.1);")
         
         state_label.setText(tr("mission_merge.conflict_current_state", state=state_text))
+
+    def _update_remaining_label(self, tab_data: dict):
+        """Update per-file remaining/resolved count label."""
+        lbl = tab_data.get("remaining_label")
+        if not lbl:
+            return
+        conflicts_by_key = tab_data.get("conflicts_by_key") or {}
+        resolved_by_key = tab_data.get("resolved_by_key") or {}
+        total = len(conflicts_by_key)
+        resolved = 0
+        for k in conflicts_by_key.keys():
+            if resolved_by_key.get(k):
+                resolved += 1
+        remaining = max(0, total - resolved)
+        lbl.setText(tr("mission_merge.remaining_count", remaining=remaining, total=total))
+
+    def _auto_pick_file_conflicts(self, tab_data: dict):
+        """Bulk action: auto-pick conflicts in THIS file when all options are identical."""
+        conflicts_by_key = tab_data.get("conflicts_by_key") or {}
+        if not conflicts_by_key:
+            return
+
+        resolved_by_key = tab_data.get("resolved_by_key") or {}
+        picked = 0
+
+        for conflict_key, entries in conflicts_by_key.items():
+            if resolved_by_key.get(conflict_key):
+                continue
+            entries = list(entries or [])
+            if not entries:
+                continue
+            try:
+                sigs = [self._deep_signature(e.element) for e in entries]
+                is_all_same = bool(sigs) and all(s == sigs[0] for s in sigs[1:])
+            except Exception:
+                is_all_same = False
+
+            if not is_all_same:
+                continue
+
+            tab_data["resolved_by_key"][conflict_key] = [{
+                "entry": entries[0],
+                "action": "replace",
+            }]
+            self._update_selection_actions(tab_data, conflict_key)
+            picked += 1
+
+        # Update all left-list markers
+        for conflict_key in conflicts_by_key.keys():
+            self._update_conflict_key_marker(tab_data, conflict_key)
+
+        # Refresh current selection/table
+        conflict_list = tab_data.get("conflict_list")
+        if conflict_list:
+            curr = conflict_list.currentItem()
+            if curr:
+                self._on_conflict_selected(tab_data, curr)
+
+        self._update_remaining_label(tab_data)
+        self._update_status()
+
+        if picked <= 0:
+            QMessageBox.information(self, tr("common.info"), tr("mission_merge.auto_pick_not_applicable"))
+        else:
+            QMessageBox.information(self, tr("common.success"), tr("mission_merge.auto_pick_applied", count=picked))
     
     def _update_result_preview(self, tab_data: dict):
         """Update the result preview showing merged/replaced result."""
@@ -2494,6 +2731,15 @@ class ConflictResolverDialog(QDialog):
             )
             self.status_bar.setStyleSheet("color: #4caf50; font-weight: bold; padding: 8px; background-color: rgba(76, 175, 80, 0.1);")
             self.btn_apply.setEnabled(True)
+
+        # Keep per-tab remaining label in sync
+        try:
+            tab = self.tabs.currentWidget()
+            tab_data = self._get_tab_data(tab)
+            if tab_data:
+                self._update_remaining_label(tab_data)
+        except Exception:
+            pass
     
     def _apply_resolution(self):
         """Apply conflict resolution only if all conflicts are resolved."""
@@ -2794,6 +3040,12 @@ class DuplicateFixerDialog(QDialog):
         self.lbl_total_duplicates = QLabel(f"{tr('mission_merge.total_duplicates')}: 0")
         self.lbl_total_duplicates.setStyleSheet("color: #f44336; font-weight: bold;")
         summary_layout.addWidget(self.lbl_total_duplicates)
+
+        summary_layout.addWidget(QLabel("|"))
+
+        self.lbl_remaining_groups = QLabel(tr("mission_merge.remaining_groups", remaining=0))
+        self.lbl_remaining_groups.setStyleSheet("color: #ff9800; font-weight: bold;")
+        summary_layout.addWidget(self.lbl_remaining_groups)
         
         summary_layout.addStretch()
         layout.addWidget(summary_frame)
@@ -2856,8 +3108,11 @@ class DuplicateFixerDialog(QDialog):
             
             self.lbl_files_scanned.setText(f"{tr('mission_merge.files_scanned')}: {len(xml_files)}")
             self.lbl_total_duplicates.setText(f"{tr('mission_merge.total_duplicates')}: {total_dup_groups}")
-            
-            self.btn_fix_selected.setEnabled(total_dup_groups > 0)
+            self._update_remaining_summary()
+
+            # Only enable the fix button when the user has explicitly resolved
+            # at least one group (manual selection or auto-select).
+            self.btn_fix_selected.setEnabled(False)
             
             if total_dup_groups == 0:
                 QMessageBox.information(
@@ -2974,12 +3229,37 @@ class DuplicateFixerDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
+
+        # Determine file type and merge capability using XML models
+        model_class = ConfigTypeRegistry.get_model_by_filename(filename)
+        is_mergeable = False
+        if model_class:
+            try:
+                merge_strategy = model_class.get_merge_strategy()
+                is_mergeable = merge_strategy in [MergeStrategy.MERGE_CHILDREN, MergeStrategy.APPEND]
+            except Exception:
+                is_mergeable = False
+            try:
+                mergeable_fields = XMLMergeHelper.get_mergeable_fields(model_class)
+                if mergeable_fields:
+                    is_mergeable = True
+            except Exception:
+                pass
         
         # Info
-        info = QLabel(tr("mission_merge.duplicate_select_to_keep"))
+        info_text = tr("mission_merge.conflict_replace_info") if not is_mergeable else tr("mission_merge.conflict_merge_info")
+        info = QLabel(info_text)
         info.setStyleSheet("color: #ff9800; font-size: 11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
+
+        if model_class:
+            try:
+                model_info = QLabel(f"Model: {model_class.__name__} | Strategy: {model_class.get_merge_strategy().name}")
+                model_info.setStyleSheet("color: #4caf50; font-size: 10px;")
+                layout.addWidget(model_info)
+            except Exception:
+                pass
         
         # Splitter: list on left, preview on right
         splitter = QSplitter(Qt.Horizontal)
@@ -3005,24 +3285,42 @@ class DuplicateFixerDialog(QDialog):
         left_layout.addWidget(dup_list)
         splitter.addWidget(left_widget)
         
-        # Right: entry selection and preview
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        
-        right_label = QLabel(tr("mission_merge.select_entry_to_keep"))
-        right_label.setStyleSheet("font-weight: bold;")
-        right_layout.addWidget(right_label)
-        
-        # Options table
+        # Right: options + result preview (aligned with ConflictResolverDialog)
+        right_tabs = QTabWidget()
+
+        # Tab 1: Resolution options
+        options_tab = QWidget()
+        options_layout = QVBoxLayout(options_tab)
+        options_layout.setContentsMargins(4, 4, 4, 4)
+
+        state_row = QHBoxLayout()
+
+        state_label = QLabel(tr("mission_merge.conflict_current_state", state=tr("mission_merge.conflict_state_none")))
+        state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
+        state_row.addWidget(state_label, stretch=1)
+
+        btn_auto_pick = QPushButton(tr("mission_merge.auto_pick_file"))
+        btn_auto_pick.setToolTip(tr("mission_merge.auto_pick_file_tooltip"))
+        state_row.addWidget(btn_auto_pick)
+
+        options_layout.addLayout(state_row)
+
+        remaining_label = QLabel("")
+        remaining_label.setStyleSheet("color: gray; font-size: 11px;")
+        options_layout.addWidget(remaining_label)
+
+        auto_pick_label = QLabel("")
+        auto_pick_label.setStyleSheet("color: gray; font-size: 11px;")
+        options_layout.addWidget(auto_pick_label)
+
         options_table = QTableWidget()
         options_table.setColumnCount(4)
         options_table.setAlternatingRowColors(False)
         options_table.setHorizontalHeaderLabels([
-            tr("mission_merge.keep"),
+            "",  # Checkbox
             tr("mission_merge.index"),
             tr("mission_merge.entry_preview"),
-            tr("mission_merge.source"),
+            tr("mission_merge.status"),
         ])
         options_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         options_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -3030,13 +3328,12 @@ class DuplicateFixerDialog(QDialog):
         options_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         options_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         options_table.verticalHeader().setVisible(False)
-        right_layout.addWidget(options_table, stretch=1)
-        
-        # Preview
+        options_layout.addWidget(options_table, stretch=1)
+
         preview_label = QLabel(tr("mission_merge.xml_preview"))
         preview_label.setStyleSheet("font-weight: bold;")
-        right_layout.addWidget(preview_label)
-        
+        options_layout.addWidget(preview_label)
+
         preview_text = QTextEdit()
         preview_text.setReadOnly(True)
         preview_text.setFont(QFont("Consolas", 9))
@@ -3048,9 +3345,35 @@ class DuplicateFixerDialog(QDialog):
                 border: 1px solid #3c3c3c;
             }
         """)
-        right_layout.addWidget(preview_text)
-        
-        splitter.addWidget(right_widget)
+        options_layout.addWidget(preview_text)
+
+        right_tabs.addTab(options_tab, tr("mission_merge.resolution_options"))
+
+        # Tab 2: Result preview
+        result_tab = QWidget()
+        result_layout = QVBoxLayout(result_tab)
+        result_layout.setContentsMargins(4, 4, 4, 4)
+
+        result_info = QLabel(tr("mission_merge.result_preview_info"))
+        result_info.setStyleSheet("color: gray; font-size: 11px;")
+        result_info.setWordWrap(True)
+        result_layout.addWidget(result_info)
+
+        result_preview = QTextEdit()
+        result_preview.setReadOnly(True)
+        result_preview.setFont(QFont("Consolas", 9))
+        result_preview.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+        """)
+        result_layout.addWidget(result_preview)
+
+        right_tabs.addTab(result_tab, tr("mission_merge.result_preview"))
+
+        splitter.addWidget(right_tabs)
         splitter.setSizes([300, 700])
         
         layout.addWidget(splitter)
@@ -3062,7 +3385,18 @@ class DuplicateFixerDialog(QDialog):
             "dup_list": dup_list,
             "options_table": options_table,
             "preview_text": preview_text,
-            "selections": {},  # {dup_index: selected_entry_index}
+            "state_label": state_label,
+            "remaining_label": remaining_label,
+            "auto_pick_label": auto_pick_label,
+            "btn_auto_pick": btn_auto_pick,
+            "result_preview": result_preview,
+            "model_class": model_class,
+            "is_mergeable": is_mergeable,
+            "resolved_by_group": {},  # {dup_index: [selected_row_indices]}
+            "_auto_picked_groups": 0,
+            "_auto_picked_entries": 0,
+            "_handlers_connected": False,
+            "_in_change": False,
         }
         widget._tab_data = tab_data
         
@@ -3070,14 +3404,13 @@ class DuplicateFixerDialog(QDialog):
         dup_list.currentItemChanged.connect(
             lambda curr, prev, td=tab_data: self._on_duplicate_selected(td, curr)
         )
+
+        btn_auto_pick.clicked.connect(lambda _=False, td=tab_data: self._auto_pick_file_groups(td))
         
-        options_table.itemChanged.connect(
-            lambda item, td=tab_data: self._on_keep_selection_changed(td, item)
-        )
-        
-        options_table.cellClicked.connect(
-            lambda r, c, td=tab_data: self._on_option_row_clicked(td, r)
-        )
+        # Connect signals
+        options_table.itemChanged.connect(lambda item, td=tab_data: self._on_keep_selection_changed(td, item))
+        options_table.itemClicked.connect(lambda item, td=tab_data: self._on_keep_selection_changed(td, item))
+        options_table.cellClicked.connect(lambda r, c, td=tab_data: self._on_option_row_clicked(td, r, c))
         
         self.tabs.addTab(widget, f"{filename} ({len(duplicates)})")
         
@@ -3100,42 +3433,55 @@ class DuplicateFixerDialog(QDialog):
         
         dup_group = duplicates[dup_index]
         entries = dup_group["entries"]
+
+        # NOTE: Auto-pick is a bulk per-file action via the button.
         
         # Clear and populate options table
-        options_table.setRowCount(0)
-        tab_data["_current_dup_index"] = dup_index
+        tab_data["_in_change"] = True
+        try:
+            options_table.setRowCount(0)
+            tab_data["_current_dup_index"] = dup_index
+        finally:
+            tab_data["_in_change"] = False
         
-        # Get previously selected entry for this group (default to first)
-        selected_idx = tab_data["selections"].get(dup_index, 0)
+        # Previously selected rows for this group
+        selected_rows = list(tab_data.get("resolved_by_group", {}).get(dup_index, []) or [])
         
-        for i, (entry_idx, element) in enumerate(entries):
-            row = options_table.rowCount()
-            options_table.insertRow(row)
-            
-            # Keep checkbox (radio-like behavior)
-            keep_item = QTableWidgetItem("")
-            keep_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
-            keep_item.setCheckState(Qt.Checked if i == selected_idx else Qt.Unchecked)
-            keep_item.setData(Qt.UserRole, i)
-            options_table.setItem(row, 0, keep_item)
-            
-            # Index
-            idx_item = QTableWidgetItem(f"#{entry_idx}")
-            idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable)
-            options_table.setItem(row, 1, idx_item)
-            
-            # Preview
-            xml_str = ET.tostring(element, encoding="unicode")
-            preview = xml_str[:80] + "..." if len(xml_str) > 80 else xml_str
-            preview_item = QTableWidgetItem(preview.replace("\n", " "))
-            preview_item.setFlags(preview_item.flags() & ~Qt.ItemIsEditable)
-            preview_item.setToolTip(xml_str)
-            options_table.setItem(row, 2, preview_item)
-            
-            # Source info
-            source_item = QTableWidgetItem(f"Entry {i+1}/{len(entries)}")
-            source_item.setFlags(source_item.flags() & ~Qt.ItemIsEditable)
-            options_table.setItem(row, 3, source_item)
+        tab_data["_in_change"] = True
+        try:
+            for i, (entry_idx, element) in enumerate(entries):
+                row = options_table.rowCount()
+                options_table.insertRow(row)
+                
+                # Selection checkbox
+                selected = i in selected_rows
+                sel_item = QTableWidgetItem("")
+                sel_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+                sel_item.setData(Qt.UserRole, i)  # row index in entries list
+                sel_item.setData(Qt.UserRole + 1, dup_index)
+                sel_item.setCheckState(Qt.Checked if selected else Qt.Unchecked)
+                options_table.setItem(row, 0, sel_item)
+                
+                # Index
+                idx_item = QTableWidgetItem(f"#{entry_idx}")
+                idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable)
+                options_table.setItem(row, 1, idx_item)
+                
+                # Preview
+                xml_str = ET.tostring(element, encoding="unicode")
+                preview = xml_str[:80] + "..." if len(xml_str) > 80 else xml_str
+                preview_item = QTableWidgetItem(preview.replace("\n", " "))
+                preview_item.setFlags(preview_item.flags() & ~Qt.ItemIsEditable)
+                preview_item.setToolTip(xml_str)
+                options_table.setItem(row, 2, preview_item)
+
+                # Status
+                status_item = QTableWidgetItem(tr("mission_merge.selected") if selected else "")
+                status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
+                status_item.setForeground(QColor("#4caf50") if selected else QColor("#888"))
+                options_table.setItem(row, 3, status_item)
+        finally:
+            tab_data["_in_change"] = False
         
         # Show preview of first entry
         if entries:
@@ -3144,38 +3490,86 @@ class DuplicateFixerDialog(QDialog):
             xml_preview += f"<!-- {len(entries)} occurrences found -->\n\n"
             xml_preview += ET.tostring(entries[0][1], encoding="unicode")
             preview_text.setText(xml_preview)
+
+        # Update state label and result preview
+        self._refresh_option_row_visuals(tab_data)
+        self._update_state_label(tab_data)
+        self._update_result_preview(tab_data)
+        self._update_remaining_label(tab_data)
+        self._update_remaining_summary()
+
+        # Update left list item marker
+        self._update_duplicate_group_marker(tab_data, dup_index)
+
+        try:
+            options_table.viewport().update()
+        except Exception:
+            pass
     
     def _on_keep_selection_changed(self, tab_data: dict, changed_item: QTableWidgetItem):
-        """Handle keep checkbox change (enforce single selection)."""
-        if not changed_item or changed_item.column() != 0:
+        """Handle checkbox changes.
+
+        Behavior:
+        - Non-mergeable files: only one selection (radio behavior) => replace
+        - Mergeable files: allow multiple selections => merge
+        """
+        if not changed_item:
             return
-        
+        if tab_data.get("_in_change"):
+            return
+        if changed_item.column() != 0:
+            return
+
         options_table = tab_data["options_table"]
-        dup_index = tab_data.get("_current_dup_index")
-        
-        if changed_item.checkState() == Qt.Checked:
-            entry_idx = changed_item.data(Qt.UserRole)
-            
-            # Uncheck all other items
-            for r in range(options_table.rowCount()):
-                item = options_table.item(r, 0)
-                if item and item.data(Qt.UserRole) != entry_idx:
-                    item.setCheckState(Qt.Unchecked)
-            
-            # Store selection
-            if dup_index is not None:
-                tab_data["selections"][dup_index] = entry_idx
-                
-                # Update list item to show resolved
-                dup_list = tab_data["dup_list"]
-                for i in range(dup_list.count()):
-                    it = dup_list.item(i)
-                    if it and it.data(Qt.UserRole) == dup_index:
-                        it.setForeground(QColor("#4caf50"))
-                        break
+        dup_index = changed_item.data(Qt.UserRole + 1) or tab_data.get("_current_dup_index")
+        if dup_index is None:
+            return
+
+        is_mergeable = bool(tab_data.get("is_mergeable"))
+
+        row = changed_item.row()
+        selected_rows: list[int] = []
+        for r in range(options_table.rowCount()):
+            it = options_table.item(r, 0)
+            if it and it.checkState() == Qt.Checked:
+                try:
+                    selected_rows.append(int(it.data(Qt.UserRole)))
+                except Exception:
+                    pass
+
+        # Non-mergeable -> enforce single selection (keep latest checked)
+        if not is_mergeable and changed_item.checkState() == Qt.Checked:
+            chosen = changed_item.data(Qt.UserRole)
+            tab_data["_in_change"] = True
+            try:
+                for r in range(options_table.rowCount()):
+                    it = options_table.item(r, 0)
+                    if not it:
+                        continue
+                    if it is changed_item:
+                        continue
+                    if it.checkState() == Qt.Checked:
+                        it.setCheckState(Qt.Unchecked)
+            finally:
+                tab_data["_in_change"] = False
+            selected_rows = [int(chosen)] if chosen is not None else []
+
+        # Persist selection
+        if selected_rows:
+            tab_data["resolved_by_group"][int(dup_index)] = sorted(set(selected_rows))
+        else:
+            tab_data.get("resolved_by_group", {}).pop(int(dup_index), None)
+
+        # Update markers + visuals
+        self._update_duplicate_group_marker(tab_data, int(dup_index))
+        self._refresh_option_row_visuals(tab_data)
+        self._update_state_label(tab_data)
+        self._update_result_preview(tab_data)
+        self._update_remaining_label(tab_data)
+        self._update_remaining_summary()
     
-    def _on_option_row_clicked(self, tab_data: dict, row: int):
-        """Select entry when clicking anywhere on the row."""
+    def _on_option_row_clicked(self, tab_data: dict, row: int, col: int):
+        """Update preview and toggle selection by clicking on a row."""
         options_table = tab_data["options_table"]
         preview_text = tab_data["preview_text"]
         dup_index = tab_data.get("_current_dup_index")
@@ -3197,16 +3591,24 @@ class DuplicateFixerDialog(QDialog):
             xml_preview += f"<!-- Entry {row+1}/{len(entries)} -->\n\n"
             xml_preview += ET.tostring(entries[row][1], encoding="unicode")
             preview_text.setText(xml_preview)
-            
-            # Toggle selection
-            item = options_table.item(row, 0)
-            if item:
-                item.setCheckState(Qt.Checked)
+
+            # Toggle selection if clicking outside the checkbox column
+            if col != 0:
+                item = options_table.item(row, 0)
+                if item:
+                    item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
+
+        try:
+            options_table.viewport().update()
+        except Exception:
+            pass
     
     def _fix_selected_duplicates(self):
         """Apply fixes for selected duplicates."""
         # Collect all selections
         fixes_by_file: dict[str, list[dict]] = {}
+        estimated_remove_entries = 0
+        selected_groups = 0
         
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)
@@ -3216,28 +3618,59 @@ class DuplicateFixerDialog(QDialog):
             
             filename = tab_data["filename"]
             duplicates = tab_data["duplicates"]
-            selections = tab_data["selections"]
-            
-            for dup_idx, dup_group in enumerate(duplicates):
-                selected_entry_idx = selections.get(dup_idx, 0)
+            selections = tab_data.get("resolved_by_group", {})
+            is_mergeable = bool(tab_data.get("is_mergeable"))
+            model_class = tab_data.get("model_class")
+
+            for dup_idx, selected_rows_raw in (selections or {}).items():
+                try:
+                    dup_idx = int(dup_idx)
+                except Exception:
+                    continue
+                if dup_idx < 0 or dup_idx >= len(duplicates):
+                    continue
+                dup_group = duplicates[dup_idx]
+                selected_rows = list(selected_rows_raw or [])
+                if not selected_rows:
+                    continue
+
+                # Determine action
+                action = "replace"
+                if len(selected_rows) > 1 and is_mergeable:
+                    action = "merge"
+
                 fixes_by_file.setdefault(filename, []).append({
-                    "name": dup_group["name"],
+                    "key": dup_group.get("key"),
+                    "label": dup_group.get("label"),
                     "entries": dup_group["entries"],
-                    "keep_index": selected_entry_idx,
+                    "selected_rows": selected_rows,
+                    "action": action,
                     "file_path": dup_group["file_path"],
+                    "model_class": model_class,
                 })
+
+                try:
+                    estimated_remove_entries += max(0, int(len(dup_group.get("entries") or [])) - 1)
+                except Exception:
+                    pass
+                selected_groups += 1
         
         if not fixes_by_file:
             QMessageBox.warning(self, tr("common.warning"), tr("mission_merge.no_fixes_selected"))
             return
-        
-        # Count total fixes
-        total_fixes = sum(len(fixes) for fixes in fixes_by_file.values())
+
+        total_files = len([f for f in fixes_by_file.keys()])
         
         # Confirm
         reply = QMessageBox.question(
             self, tr("common.confirm"),
-            tr("mission_merge.confirm_fix_duplicates").format(count=total_fixes),
+            tr("mission_merge.confirm_fix_duplicates_detailed").format(
+                entries=estimated_remove_entries,
+                groups=selected_groups,
+                files=total_files,
+            )
+            if "confirm_fix_duplicates_detailed" in (tr("mission_merge.confirm_fix_duplicates_detailed") or "")
+            else tr("mission_merge.confirm_fix_duplicates").format(count=estimated_remove_entries),
             QMessageBox.Yes | QMessageBox.No
         )
         
@@ -3253,32 +3686,116 @@ class DuplicateFixerDialog(QDialog):
                 if not file_path.exists():
                     continue
 
-                # Parse (robust first)
+                # Parse (robust first) and keep the model for stable signatures
                 try:
-                    tree, root, _model = XMLMergeHelper.parse_xml_file(file_path)
+                    tree, root, model = XMLMergeHelper.parse_xml_file(file_path)
                 except Exception:
                     tree = ET.parse(file_path)
                     root = tree.getroot()
-                
-                # Build list of elements to remove (indices to remove, keeping selected)
-                indices_to_remove = []
-                
+                    model = ConfigTypeRegistry.get_model_by_root_element(str(getattr(root, "tag", "") or ""))
+
+                def _entry_sig(el: ET.Element) -> Optional[str]:
+                    try:
+                        return XMLMergeHelper.get_element_signature(el, model)
+                    except Exception:
+                        return None
+
+                def _child_sig(ch: ET.Element, model_class: Optional[Type]) -> str:
+                    try:
+                        s = XMLMergeHelper.get_element_signature(ch, model_class)
+                    except Exception:
+                        s = None
+                    if s:
+                        return str(s)
+                    try:
+                        return str((str(ch.tag), tuple(sorted((ch.attrib or {}).items())), (ch.text or "").strip()))
+                    except Exception:
+                        return str(id(ch))
+
+                # Apply each fix group by matching the duplicate key against the CURRENT parsed tree.
+                # This avoids index-shift bugs when earlier removals/merges change child positions.
                 for fix in fixes:
-                    entries = fix["entries"]
-                    keep_idx = fix["keep_index"]
-                    
-                    for i, (entry_idx, element) in enumerate(entries):
-                        if i != keep_idx:
-                            indices_to_remove.append(entry_idx)
-                
-                # Remove elements (in reverse order to preserve indices)
-                indices_to_remove.sort(reverse=True)
-                
-                all_children = list(root)
-                for idx in indices_to_remove:
-                    if 0 <= idx < len(all_children):
-                        root.remove(all_children[idx])
-                        fixed_count += 1
+                    group_key = fix.get("key")
+                    if not group_key:
+                        continue
+
+                    selected_rows = [int(x) for x in (fix.get("selected_rows") or []) if str(x).isdigit()]
+                    if not selected_rows:
+                        selected_rows = [0]
+
+                    action = str(fix.get("action") or "replace")
+                    model_class = fix.get("model_class")
+
+                    current_children = list(root)
+                    occurrences: list[ET.Element] = []
+                    for ch in current_children:
+                        if not isinstance(getattr(ch, "tag", None), str):
+                            continue
+                        if _entry_sig(ch) == group_key:
+                            occurrences.append(ch)
+
+                    if len(occurrences) <= 1:
+                        continue
+
+                    # Clamp selected rows to current occurrences length
+                    selected_rows = [r for r in selected_rows if 0 <= r < len(occurrences)]
+                    if not selected_rows:
+                        selected_rows = [0]
+
+                    keep_el = occurrences[selected_rows[0]]
+
+                    # Elements chosen for merge/keep context
+                    selected_els = [occurrences[r] for r in selected_rows]
+
+                    # Remove all duplicates except the kept one
+                    for ch in occurrences:
+                        if ch is keep_el:
+                            continue
+                        try:
+                            root.remove(ch)
+                            fixed_count += 1
+                        except Exception:
+                            pass
+
+                    # Merge: replace kept element with merged children from selected entries
+                    if action == "merge" and len(selected_els) > 1:
+                        try:
+                            keep_pos = list(root).index(keep_el)
+                        except ValueError:
+                            keep_pos = None
+
+                        merged = ET.Element(keep_el.tag, dict(keep_el.attrib))
+                        try:
+                            merged.text = keep_el.text
+                        except Exception:
+                            pass
+
+                        seen_child = set()
+                        for el in selected_els:
+                            for child in list(el):
+                                sig = _child_sig(child, model_class)
+                                if sig in seen_child:
+                                    continue
+                                cloned = ET.Element(child.tag, dict(child.attrib))
+                                cloned.text = child.text
+                                cloned.tail = child.tail
+                                for subchild in list(child):
+                                    cloned.append(subchild)
+                                merged.append(cloned)
+                                seen_child.add(sig)
+
+                        try:
+                            root.remove(keep_el)
+                        except Exception:
+                            pass
+
+                        if keep_pos is None:
+                            root.append(merged)
+                        else:
+                            try:
+                                root.insert(int(keep_pos), merged)
+                            except Exception:
+                                root.append(merged)
                 
                 # Save
                 try:
@@ -3298,3 +3815,295 @@ class DuplicateFixerDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, tr("common.error"), str(e))
+
+    def _update_duplicate_group_marker(self, tab_data: dict, dup_index: int):
+        """Mark duplicate group as resolved/unresolved in the left list."""
+        dup_list = tab_data.get("dup_list")
+        if not dup_list:
+            return
+        resolved = bool((tab_data.get("resolved_by_group") or {}).get(dup_index))
+        for i in range(dup_list.count()):
+            it = dup_list.item(i)
+            if not it:
+                continue
+            if it.data(Qt.UserRole) != dup_index:
+                continue
+            text = it.text().lstrip("✓ ")
+            it.setText(("✓ " if resolved else "") + text)
+            it.setForeground(QColor("#4caf50") if resolved else QColor("#f44336"))
+            break
+
+    def _update_remaining_label(self, tab_data: dict):
+        """Update per-file remaining/resolved count label."""
+        lbl = tab_data.get("remaining_label")
+        if not lbl:
+            return
+        total = len(tab_data.get("duplicates") or [])
+        resolved_by_group = tab_data.get("resolved_by_group") or {}
+        resolved = 0
+        for i in range(total):
+            if resolved_by_group.get(i):
+                resolved += 1
+        remaining = max(0, total - resolved)
+        lbl.setText(tr("mission_merge.remaining_count", remaining=remaining, total=total))
+
+    def _auto_pick_file_groups(self, tab_data: dict):
+        """Bulk action: auto-pick duplicate groups in THIS file when all options are identical."""
+        duplicates = list(tab_data.get("duplicates", []) or [])
+        if not duplicates:
+            return
+
+        resolved_by_group = tab_data.get("resolved_by_group") or {}
+        picked = 0
+        picked_entries = 0
+
+        for dup_index, dup_group in enumerate(duplicates):
+            if resolved_by_group.get(dup_index):
+                continue
+            entries = list((dup_group or {}).get("entries") or [])
+            if not entries:
+                continue
+            try:
+                sigs = [self._deep_signature(el) for _idx, el in entries]
+                is_all_same = bool(sigs) and all(s == sigs[0] for s in sigs[1:])
+            except Exception:
+                is_all_same = False
+
+            if not is_all_same:
+                continue
+
+            tab_data["resolved_by_group"][dup_index] = [0]
+            picked += 1
+            try:
+                picked_entries += max(0, int(len(entries)) - 1)
+            except Exception:
+                pass
+            self._update_duplicate_group_marker(tab_data, dup_index)
+
+        # Refresh current selection/table
+        dup_list = tab_data.get("dup_list")
+        if dup_list:
+            curr = dup_list.currentItem()
+            if curr:
+                self._on_duplicate_selected(tab_data, curr)
+
+        self._update_remaining_label(tab_data)
+        self._update_remaining_summary()
+
+        tab_data["_auto_picked_groups"] = int(picked)
+        tab_data["_auto_picked_entries"] = int(picked_entries)
+        self._update_auto_pick_label(tab_data)
+
+        if picked <= 0:
+            QMessageBox.information(self, tr("common.info"), tr("mission_merge.auto_pick_not_applicable"))
+        else:
+            QMessageBox.information(
+                self,
+                tr("common.success"),
+                tr("mission_merge.auto_pick_applied_details").format(groups=picked, entries=picked_entries)
+                if "auto_pick_applied_details" in (tr("mission_merge.auto_pick_applied_details") or "")
+                else tr("mission_merge.auto_pick_applied", count=picked),
+            )
+
+    def _update_auto_pick_label(self, tab_data: dict):
+        """Update per-file label showing auto-selected counts (for transparency)."""
+        lbl = tab_data.get("auto_pick_label")
+        if not lbl:
+            return
+        g = int(tab_data.get("_auto_picked_groups") or 0)
+        e = int(tab_data.get("_auto_picked_entries") or 0)
+        if g <= 0:
+            lbl.setText("")
+            return
+        try:
+            lbl.setText(tr("mission_merge.auto_pick_summary").format(groups=g, entries=e))
+        except Exception:
+            lbl.setText(f"Auto selected: {g} groups / {e} entries")
+
+    def _update_remaining_summary(self):
+        """Update overall remaining groups label in the summary bar."""
+        remaining = 0
+        any_selected = False
+        for i in range(self.tabs.count()):
+            tab = self.tabs.widget(i)
+            tab_data = getattr(tab, "_tab_data", None)
+            if not tab_data:
+                continue
+            total = len(tab_data.get("duplicates") or [])
+            resolved_by_group = tab_data.get("resolved_by_group") or {}
+            if resolved_by_group:
+                any_selected = True
+            resolved = 0
+            for gi in range(total):
+                if resolved_by_group.get(gi):
+                    resolved += 1
+            remaining += max(0, total - resolved)
+        try:
+            self.lbl_remaining_groups.setText(tr("mission_merge.remaining_groups", remaining=remaining))
+        except Exception:
+            pass
+
+        try:
+            self.btn_fix_selected.setEnabled(bool(any_selected))
+        except Exception:
+            pass
+
+    def _refresh_option_row_visuals(self, tab_data: dict):
+        """Update per-row status text and highlight based on checked state."""
+        options_table = tab_data.get("options_table")
+        if not options_table:
+            return
+
+        for r in range(options_table.rowCount()):
+            sel_item = options_table.item(r, 0)
+            if not sel_item:
+                continue
+
+            checked = sel_item.checkState() == Qt.Checked
+            status_item = options_table.item(r, 3)
+            if status_item:
+                status_item.setText(tr("mission_merge.selected") if checked else "")
+                status_item.setForeground(QColor("#4caf50") if checked else QColor("#888"))
+
+            bg = QColor("#1b3b1b") if checked else QColor("#000000")
+            for c in range(1, options_table.columnCount()):
+                cell = options_table.item(r, c)
+                if cell:
+                    cell.setBackground(bg)
+
+    def _update_state_label(self, tab_data: dict):
+        """Update the state label showing current selection status."""
+        state_label = tab_data.get("state_label")
+        if not state_label:
+            return
+
+        dup_index = tab_data.get("_current_dup_index")
+        if dup_index is None:
+            state_label.setText(tr("mission_merge.conflict_current_state", state=tr("mission_merge.conflict_state_none")))
+            state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
+            return
+
+        selections = list((tab_data.get("resolved_by_group") or {}).get(dup_index, []) or [])
+
+        if not selections:
+            state_text = tr("mission_merge.conflict_state_none")
+            state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
+        elif len(selections) == 1:
+            # Replace
+            try:
+                dup_group = tab_data.get("duplicates", [])[dup_index]
+                entries = dup_group.get("entries") or []
+                el = entries[int(selections[0])][1] if entries else None
+                name = (el.get("name") if el is not None else None) or (dup_group.get("label") or dup_group.get("key") or "")
+            except Exception:
+                name = ""
+            state_text = tr("mission_merge.conflict_state_replace", name=name)
+            state_label.setStyleSheet("color: #4caf50; font-weight: bold; padding: 4px; background-color: rgba(76, 175, 80, 0.1);")
+        else:
+            state_text = tr("mission_merge.conflict_state_merge", count=len(selections))
+            state_label.setStyleSheet("color: #2196f3; font-weight: bold; padding: 4px; background-color: rgba(33, 150, 243, 0.1);")
+
+        state_label.setText(tr("mission_merge.conflict_current_state", state=state_text))
+
+    def _update_result_preview(self, tab_data: dict):
+        """Update the result preview showing merged/replaced result."""
+        result_preview = tab_data.get("result_preview")
+        if not result_preview:
+            return
+
+        dup_index = tab_data.get("_current_dup_index")
+        if dup_index is None:
+            result_preview.setText("")
+            return
+
+        selections = list((tab_data.get("resolved_by_group") or {}).get(dup_index, []) or [])
+        duplicates = tab_data.get("duplicates", [])
+        if dup_index >= len(duplicates):
+            result_preview.setText("")
+            return
+
+        entries = list(duplicates[dup_index].get("entries") or [])
+        if not selections:
+            result_preview.setText(f"<!-- {tr('mission_merge.conflict_state_none')} -->")
+            return
+
+        is_mergeable = bool(tab_data.get("is_mergeable"))
+        model_class = tab_data.get("model_class")
+
+        if len(selections) == 1 or not is_mergeable:
+            try:
+                el = entries[int(selections[0])][1]
+            except Exception:
+                el = entries[0][1] if entries else None
+            if el is None:
+                result_preview.setText("")
+                return
+            xml_preview = f"<!-- {tr('mission_merge.conflict_state_replace', name='')} -->\n\n"
+            xml_preview += ET.tostring(el, encoding="unicode")
+            result_preview.setText(xml_preview)
+            return
+
+        # Merge preview
+        xml_preview = f"<!-- {tr('mission_merge.conflict_state_merge', count=len(selections))} -->\n\n"
+        try:
+            base_el = entries[int(selections[0])][1]
+        except Exception:
+            base_el = entries[0][1]
+
+        merged = ET.Element(base_el.tag, dict(base_el.attrib))
+        try:
+            merged.text = base_el.text
+        except Exception:
+            pass
+
+        seen = set()
+        for sel_row in selections:
+            try:
+                el = entries[int(sel_row)][1]
+            except Exception:
+                continue
+            for child in list(el):
+                try:
+                    sig = XMLMergeHelper.get_element_signature(child, model_class)
+                except Exception:
+                    sig = None
+                if not sig:
+                    try:
+                        sig = (str(child.tag), tuple(sorted((child.attrib or {}).items())), (child.text or "").strip())
+                    except Exception:
+                        sig = id(child)
+                if sig in seen:
+                    continue
+                cloned = ET.Element(child.tag, dict(child.attrib))
+                cloned.text = child.text
+                cloned.tail = child.tail
+                for subchild in list(child):
+                    cloned.append(subchild)
+                merged.append(cloned)
+                seen.add(sig)
+
+        xml_preview += ET.tostring(merged, encoding="unicode")
+        result_preview.setText(xml_preview)
+
+    @staticmethod
+    def _deep_signature(elem: ET.Element):
+        """Compute a stable deep signature for an XML element."""
+        try:
+            tag = str(elem.tag)
+        except Exception:
+            tag = ""
+        try:
+            attrib = tuple(sorted((elem.attrib or {}).items()))
+        except Exception:
+            attrib = ()
+        try:
+            text = (elem.text or "").strip()
+        except Exception:
+            text = ""
+        children = []
+        try:
+            for ch in list(elem):
+                children.append(DuplicateFixerDialog._deep_signature(ch))
+        except Exception:
+            children = []
+        return (tag, attrib, text, tuple(children))
