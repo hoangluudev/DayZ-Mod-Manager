@@ -13,3 +13,4 @@ __pycache__/
 # Local env
 venv/
 env/
+app_embedded.py

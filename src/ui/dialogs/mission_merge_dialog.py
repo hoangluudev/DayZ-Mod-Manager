@@ -44,6 +44,7 @@ from src.models.xml_config_models import (
 )
 from src.ui.widgets.icon_button import IconButton
 from src.utils.locale_manager import tr
+from src.core.mod_name_manager import ModNameManager
 
 
 # Patterns to detect preset files (normal, hard, hardcore, etc.)
@@ -196,7 +197,32 @@ class EntryTreeItem(QTreeWidgetItem):
         self.entry = entry
         self.setText(0, entry.unique_key.split(":", 1)[-1] if ":" in entry.unique_key else entry.unique_key)
         self.setText(1, entry.tag)
-        self.setText(2, entry.source_mod)
+        # Show readable display name for source mod when possible
+        src_mod = str(entry.source_mod or "")
+        display_src = src_mod
+        try:
+            # access name manager from parent dialog if available via Qt parent chain
+            # Fallback to trying self.window() attribute
+            parent = getattr(self, 'parent', None)
+        except Exception:
+            parent = None
+        try:
+            if hasattr(self, 'treeWidget') and getattr(self.treeWidget(), 'parent', None):
+                maybe = self.treeWidget().parent()
+            else:
+                maybe = None
+        except Exception:
+            maybe = None
+        try:
+            nm = None
+            if getattr(self, 'treeWidget', None) and self.treeWidget() is not None:
+                win = self.treeWidget().window()
+                nm = getattr(win, '_name_mgr', None)
+            if nm:
+                display_src = nm.get_original_name(src_mod)
+        except Exception:
+            display_src = src_mod
+        self.setText(2, display_src)
         
         # Status with color
         status_text, color = self._get_status_display(entry.status)
@@ -235,6 +261,11 @@ class MissionConfigMergeDialog(QDialog):
         self.merger = MissionConfigMerger(
             self.mission_path, server_path, self.current_map
         )
+        # Name manager resolves shortened folder names like @m1 to original display names
+        try:
+            self._name_mgr = ModNameManager(server_path)
+        except Exception:
+            self._name_mgr = None
         self.preview: Optional[MergePreview] = None
         self.skipped_mods: set[str] = set()
         self._conflict_entries: dict = {}  # Store conflict data for resolution
@@ -680,6 +711,15 @@ class MissionConfigMergeDialog(QDialog):
             MergeStrategy.SKIP: tr("mission_merge.strategy_skip"),
         }
         return mapping.get(strategy, getattr(strategy, "name", str(strategy)))
+
+    def _display_mod_name(self, mod_name: str) -> str:
+        """Return a user-friendly display name for a mod folder name."""
+        try:
+            if getattr(self, "_name_mgr", None) and mod_name:
+                return self._name_mgr.get_original_name(str(mod_name))
+        except Exception:
+            pass
+        return str(mod_name or "")
     
     def _get_merge_suggestion(self, file_path: Path, model_class: Optional[Type]) -> tuple[str, str]:
         """Get merge suggestion based on model.
@@ -1122,12 +1162,21 @@ class MissionConfigMergeDialog(QDialog):
                             mods.add(m)
 
                 mods_list = sorted(mods)
-                if not mods_list:
+                # Convert to display names if possible
+                try:
+                    if getattr(self, "_name_mgr", None):
+                        mods_display = [self._name_mgr.get_original_name(m) for m in mods_list]
+                    else:
+                        mods_display = mods_list
+                except Exception:
+                    mods_display = mods_list
+
+                if not mods_display:
                     planned_mods = "-"
-                elif len(mods_list) <= 3:
-                    planned_mods = ", ".join(mods_list)
+                elif len(mods_display) <= 3:
+                    planned_mods = ", ".join(mods_display)
                 else:
-                    planned_mods = ", ".join(mods_list[:3]) + f" (+{len(mods_list) - 3} {tr('common.more')})"
+                    planned_mods = ", ".join(mods_display[:3]) + f" (+{len(mods_display) - 3} {tr('common.more')})"
 
             self.tbl_targets.setItem(row, 3, QTableWidgetItem(planned_changes))
             self.tbl_targets.setItem(row, 4, QTableWidgetItem(planned_mods))
@@ -1153,13 +1202,21 @@ class MissionConfigMergeDialog(QDialog):
                 else:
                     invalid_files.append((config_file, invalid_reason))
             
+            # Determine display name (use original name if mapping exists)
+            display_mod_name = mod_info.mod_name
+            try:
+                if getattr(self, "_name_mgr", None):
+                    display_mod_name = self._name_mgr.get_original_name(mod_info.mod_name)
+            except Exception:
+                display_mod_name = mod_info.mod_name
+
             # Add valid files to main table
             if valid_files:
                 # Add mod header row
                 header_row = self.tbl_sources.rowCount()
                 self.tbl_sources.insertRow(header_row)
                 
-                mod_header = QTableWidgetItem(f"📦 {mod_info.mod_name}")
+                mod_header = QTableWidgetItem(f"📦 {display_mod_name}")
                 mod_header.setFont(QFont("", -1, QFont.Bold))
                 mod_header.setBackground(QColor("#3a3a3a"))
                 mod_header.setForeground(QColor("#4fc3f7"))
@@ -1171,9 +1228,9 @@ class MissionConfigMergeDialog(QDialog):
                     self._add_valid_file_row(config_file, mod_info.mod_name, model_class)
                     valid_count += 1
             
-            # Add invalid files to invalid table
+            # Add invalid files to invalid table (display original name when available)
             for config_file, reason in invalid_files:
-                self._add_invalid_file_row(config_file, mod_info.mod_name, reason)
+                self._add_invalid_file_row(config_file, mod_info.mod_name, display_mod_name, reason)
                 invalid_count += 1
         
         # Update tab titles with counts
@@ -1217,7 +1274,16 @@ class MissionConfigMergeDialog(QDialog):
         use_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
         use_item.setCheckState(Qt.Checked)
         use_item.setData(Qt.UserRole, str(config_file))
+        # Store internal folder mod name at UserRole+1 (used for operations)
         use_item.setData(Qt.UserRole + 1, mod_name)
+        # Also store display name (original) at UserRole+5 for UI purposes
+        display_name = mod_name
+        try:
+            if getattr(self, "_name_mgr", None):
+                display_name = self._name_mgr.get_original_name(mod_name)
+        except Exception:
+            display_name = mod_name
+        use_item.setData(Qt.UserRole + 5, display_name)
         use_item.setData(Qt.UserRole + 2, config_type_name)
         use_item.setData(Qt.UserRole + 3, True)  # Valid
         use_item.setData(Qt.UserRole + 4, model_class)  # Store model class
@@ -1305,8 +1371,13 @@ class MissionConfigMergeDialog(QDialog):
         target_combo.currentIndexChanged.connect(_on_change)
         self._on_source_row_changed(row)
     
-    def _add_invalid_file_row(self, config_file: Path, mod_name: str, reason: str):
-        """Add an invalid file row to the invalid sources table."""
+    def _add_invalid_file_row(self, config_file: Path, folder_mod_name: str, display_mod_name: str, reason: str):
+        """Add an invalid file row to the invalid sources table.
+
+        Args:
+            folder_mod_name: internal folder name (e.g., @m1)
+            display_mod_name: resolved original display name to show in UI
+        """
         row = self.tbl_invalid_sources.rowCount()
         self.tbl_invalid_sources.insertRow(row)
         
@@ -1315,8 +1386,13 @@ class MissionConfigMergeDialog(QDialog):
         file_item.setForeground(QColor("#ff5252"))
         self.tbl_invalid_sources.setItem(row, 0, file_item)
         
-        # Mod name
-        mod_item = QTableWidgetItem(mod_name)
+        # Mod name (display)
+        mod_item = QTableWidgetItem(display_mod_name)
+        # Keep internal folder name in data (folder_mod_name)
+        try:
+            mod_item.setData(Qt.UserRole, folder_mod_name)
+        except Exception:
+            pass
         self.tbl_invalid_sources.setItem(row, 1, mod_item)
         
         # Reason
@@ -1390,8 +1466,15 @@ class MissionConfigMergeDialog(QDialog):
             if status_item and status_item.foreground().color().name().lower() == QColor("#ff9800").name().lower():
                 file_item = self.tbl_sources.item(row, 1)
                 file_ = file_item.text() if file_item else ""
-                mod_name = str(use_item.data(Qt.UserRole + 1) or "")
-                invalid.append(f"{mod_name} / {file_}")
+                # Prefer display name stored at UserRole+5, fallback to mapping
+                display = use_item.data(Qt.UserRole + 5) or ""
+                if not display:
+                    folder_name = str(use_item.data(Qt.UserRole + 1) or "")
+                    try:
+                        display = self._name_mgr.get_original_name(folder_name) if getattr(self, "_name_mgr", None) else folder_name
+                    except Exception:
+                        display = folder_name
+                invalid.append(f"{display} / {file_}")
 
         if invalid:
             shown = ", ".join(invalid[:3])
@@ -1637,11 +1720,19 @@ class MissionConfigMergeDialog(QDialog):
                 mod_name = str(getattr(display_entry, "source_mod", "") or "")
                 if not mod_name:
                     mod_name = "(unknown)"
+                # Resolve display name if possible
+                try:
+                    if getattr(self, "_name_mgr", None) and mod_name and mod_name != "(unknown)":
+                        display_group_name = self._name_mgr.get_original_name(mod_name)
+                    else:
+                        display_group_name = mod_name
+                except Exception:
+                    display_group_name = mod_name
 
                 mod_item = mod_groups.get(mod_name)
                 if mod_item is None:
                     mod_item = QTreeWidgetItem()
-                    mod_item.setText(0, f"📦 {mod_name}")
+                    mod_item.setText(0, f"📦 {display_group_name}")
                     mod_item.setFont(0, QFont("", -1, QFont.Bold))
                     mod_item.setForeground(0, QColor("#4fc3f7"))
                     file_item.addChild(mod_item)
@@ -1718,7 +1809,13 @@ class MissionConfigMergeDialog(QDialog):
             }
             status_text = status_labels.get(item.entry.status, str(getattr(item.entry.status, "value", item.entry.status)))
 
-            info = f"<!-- {tr('mission_merge.source')}: {item.entry.source_mod} -->\n"
+            # Show readable source mod name in preview (but keep original value for comments)
+            src = str(item.entry.source_mod or "")
+            try:
+                display_src = self._name_mgr.get_original_name(src) if getattr(self, "_name_mgr", None) else src
+            except Exception:
+                display_src = src
+            info = f"<!-- {tr('mission_merge.source')}: {display_src} -->\n"
             info += f"<!-- {tr('mission_merge.file')}: {item.entry.source_file.name} -->\n"
             info += f"<!-- {tr('mission_merge.status')}: {status_text} -->\n\n"
             info += xml_str
@@ -2242,8 +2339,12 @@ class ConflictResolverDialog(QDialog):
             check_item.setCheckState(Qt.Checked if selected else Qt.Unchecked)
             options_table.setItem(row, 0, check_item)
             
-            # Source mod
-            mod_item = QTableWidgetItem(str(entry.source_mod))
+            # Source mod (display name if available)
+            try:
+                display_mod = self._name_mgr.get_original_name(str(entry.source_mod)) if getattr(self, '_name_mgr', None) else str(entry.source_mod)
+            except Exception:
+                display_mod = str(entry.source_mod)
+            mod_item = QTableWidgetItem(display_mod)
             mod_item.setFlags(mod_item.flags() & ~Qt.ItemIsEditable)
             options_table.setItem(row, 1, mod_item)
             
@@ -2268,7 +2369,11 @@ class ConflictResolverDialog(QDialog):
         
         # Show preview of first entry
         if entries:
-            xml_preview = f"<!-- {tr('mission_merge.source')}: {entries[0].source_mod} -->\n"
+            try:
+                head_src = self._name_mgr.get_original_name(str(entries[0].source_mod)) if getattr(self, '_name_mgr', None) else str(entries[0].source_mod)
+            except Exception:
+                head_src = str(entries[0].source_mod)
+            xml_preview = f"<!-- {tr('mission_merge.source')}: {head_src} -->\n"
             xml_preview += f"<!-- {tr('mission_merge.file')}: {entries[0].source_file.name} -->\n\n"
             xml_preview += entries[0].to_xml_string()
             preview_text.setText(xml_preview)
@@ -2558,13 +2663,13 @@ class ConflictResolverDialog(QDialog):
         if len(selections) == 1:
             # Replace: show the selected entry
             entry = selections[0]["entry"]
-            xml_preview = f"<!-- {tr('mission_merge.conflict_state_replace', name=entry.source_mod)} -->\n\n"
+            xml_preview = f"<!-- {tr('mission_merge.conflict_state_replace', name=self._display_mod_name(entry.source_mod))} -->\n\n"
             xml_preview += entry.to_xml_string()
             result_preview.setText(xml_preview)
         else:
             # Merge: build combined result
             xml_preview = f"<!-- {tr('mission_merge.conflict_state_merge', count=len(selections))} -->\n"
-            sources = ", ".join([sel["entry"].source_mod for sel in selections])
+            sources = ", ".join([self._display_mod_name(sel["entry"].source_mod) for sel in selections])
             xml_preview += f"<!-- Sources: {sources} -->\n\n"
             
             # Get first entry as base
@@ -2666,7 +2771,7 @@ class ConflictResolverDialog(QDialog):
         
         if row < len(entries):
             entry = entries[row]
-            xml_preview = f"<!-- {tr('mission_merge.source')}: {entry.source_mod} -->\n"
+            xml_preview = f"<!-- {tr('mission_merge.source')}: {self._display_mod_name(entry.source_mod)} -->\n"
             xml_preview += f"<!-- {tr('mission_merge.file')}: {entry.source_file.name} -->\n\n"
             xml_preview += entry.to_xml_string()
             preview_text.setText(xml_preview)
@@ -2928,7 +3033,7 @@ class ConflictResolverDialog(QDialog):
                                 cloned.append(subchild)
                             merge_groups[parent_key]["children"].append(cloned)
                             existing_sigs.add(sig)
-                    merge_groups[parent_key]["sources"].append(entry.source_mod)
+                    merge_groups[parent_key]["sources"].append(self._display_mod_name(entry.source_mod))
                 else:
                     replace_entries.append((entry, action))
             
@@ -2950,7 +3055,7 @@ class ConflictResolverDialog(QDialog):
             
             # Add replace entries
             for entry, action in replace_entries:
-                xml_content += f"<!-- Entry: {entry.source_mod} ({action}) -->\n"
+                xml_content += f"<!-- Entry: {self._display_mod_name(entry.source_mod)} ({action}) -->\n"
                 xml_content += entry.to_xml_string() + "\n\n"
             
             text_edit.setText(xml_content)
