@@ -258,14 +258,18 @@ class MissionConfigMergeDialog(QDialog):
         parts = mission_template.split(".")
         self.current_map = parts[-1] if len(parts) > 1 else "chernarusplus"
         
-        self.merger = MissionConfigMerger(
-            self.mission_path, server_path, self.current_map
-        )
         # Name manager resolves shortened folder names like @m1 to original display names
         try:
             self._name_mgr = ModNameManager(server_path)
         except Exception:
             self._name_mgr = None
+
+        self.merger = MissionConfigMerger(
+            self.mission_path,
+            server_path,
+            self.current_map,
+            name_mgr=self._name_mgr,
+        )
         self.preview: Optional[MergePreview] = None
         self.skipped_mods: set[str] = set()
         self._conflict_entries: dict = {}  # Store conflict data for resolution
@@ -1938,6 +1942,12 @@ class MissionConfigMergeDialog(QDialog):
             for files in new_files_map.values():
                 for src_file in files:
                     dst_file = self.mission_path / src_file.name
+                    try:
+                        if getattr(self, "merger", None):
+                            # Newer DayZ server layouts keep core config files in mission/db
+                            dst_file = self.merger.get_target_mission_file_path(src_file.name)
+                    except Exception:
+                        pass
                     if dst_file.exists():
                         overwrite_names.add(dst_file.name)
 
@@ -1957,6 +1967,12 @@ class MissionConfigMergeDialog(QDialog):
                 for src_file in files:
                     dst_file = self.mission_path / src_file.name
                     try:
+                        if getattr(self, "merger", None):
+                            dst_file = self.merger.get_target_mission_file_path(src_file.name)
+                    except Exception:
+                        pass
+                    try:
+                        dst_file.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(src_file, dst_file)
                         result[f"[COPIED] {src_file.name}"] = 1
                     except Exception as e:
@@ -2022,6 +2038,9 @@ class ConflictResolverDialog(QDialog):
         self.conflict_entries = conflict_entries
         self.preview = preview
         self._resolved: dict = {}
+
+        # Optional name manager from parent dialog (maps @mN -> original mod name)
+        self._name_mgr = getattr(parent, "_name_mgr", None)
         
         self.setWindowTitle(tr("mission_merge.conflict_resolver_title"))
         self.setMinimumSize(1000, 700)
@@ -2029,6 +2048,15 @@ class ConflictResolverDialog(QDialog):
         
         self._setup_ui()
         self._populate_conflicts()
+
+    def _display_mod_name(self, mod_name: str) -> str:
+        """Return a user-friendly display name for a mod folder name."""
+        try:
+            if getattr(self, "_name_mgr", None) and mod_name:
+                return self._name_mgr.get_original_name(str(mod_name))
+        except Exception:
+            pass
+        return str(mod_name or "")
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)

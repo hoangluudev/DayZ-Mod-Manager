@@ -248,8 +248,18 @@ class MissionConfigMerger:
         "server_files", "ServerConfig", "Server", "xml"
     ]
     
-    def __init__(self, mission_path: Path, server_path: Path, 
-                 current_map: str = "chernarusplus"):
+    DB_CONFIG_DIR_NAME = "db"
+    # DayZ server newer layouts keep these mission configs under mission/db
+    DB_PREFERRED_MISSION_FILES = {
+        "types.xml",
+        "events.xml",
+        "economy.xml",
+        "globals.xml",
+        "messages.xml",
+    }
+
+    def __init__(self, mission_path: Path, server_path: Path,
+                 current_map: str = "chernarusplus", name_mgr: Optional[Any] = None):
         """
         Initialize merger.
         
@@ -263,6 +273,50 @@ class MissionConfigMerger:
         self.current_map = current_map.lower()
         self._existing_entries: dict[str, dict[str, str]] = {}  # file -> {key: normalized_xml}
         self._skipped_mods: set[str] = set()
+        self._name_mgr = name_mgr
+
+    def get_target_mission_file_path(self, filename: str) -> Path:
+        """Resolve where a mission config file lives (root vs db/) for this server.
+
+        Keeps legacy behavior (root) but supports newer DayZ layouts where core
+        files are moved to mission/db.
+        """
+        name = str(filename or "")
+        if not name:
+            return self.mission_path
+
+        root_candidate = self.mission_path / name
+        db_dir = self.mission_path / self.DB_CONFIG_DIR_NAME
+        db_candidate = db_dir / name
+
+        # Prefer existing files first
+        try:
+            if db_candidate.exists():
+                return db_candidate
+        except Exception:
+            pass
+        try:
+            if root_candidate.exists():
+                return root_candidate
+        except Exception:
+            pass
+
+        # For newer servers, create new core files inside db/
+        try:
+            if db_dir.exists() and name.lower() in self.DB_PREFERRED_MISSION_FILES:
+                return db_candidate
+        except Exception:
+            pass
+
+        return root_candidate
+
+    def _display_mod_name(self, mod_name: str) -> str:
+        try:
+            if getattr(self, "_name_mgr", None) and mod_name:
+                return self._name_mgr.get_original_name(str(mod_name))
+        except Exception:
+            pass
+        return str(mod_name or "")
         
     def load_skipped_mods(self, skipped: set[str]):
         """Load set of mod names user has marked as skipped/already processed."""
@@ -274,7 +328,7 @@ class MissionConfigMerger:
             return self._existing_entries[filename]
             
         entries = {}
-        file_path = self.mission_path / filename
+        file_path = self.get_target_mission_file_path(filename)
         
         if not file_path.exists():
             self._existing_entries[filename] = entries
@@ -595,8 +649,12 @@ class MissionConfigMerger:
         for target_file, result in preview.merge_results.items():
             if not result.merged_entries and not (include_conflicts and result.conflict_entries):
                 continue
-                
-            file_path = self.mission_path / target_file
+
+            file_path = self.get_target_mission_file_path(target_file)
+            try:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
             
             # Load or create target file
             if file_path.exists():
@@ -657,7 +715,7 @@ class MissionConfigMerger:
             # Add new entries
             for entry in result.merged_entries:
                 # Add comment to mark source
-                comment = ET.Comment(f" Added by DayZ Mod Manager from {entry.source_mod} ")
+                comment = ET.Comment(f" Added by DayZ Mod Manager from {self._display_mod_name(entry.source_mod)} ")
                 root.append(comment)
                 root.append(entry.element)
                 count += 1
@@ -681,7 +739,7 @@ class MissionConfigMerger:
                         parent_elem = existing_parents[0]
                     else:
                         parent_elem = ET.Element(entry.element.tag, dict(entry.element.attrib))
-                        root.append(ET.Comment(f" MERGED (created) from {entry.source_mod} "))
+                        root.append(ET.Comment(f" MERGED (created) from {self._display_mod_name(entry.source_mod)} "))
                         root.append(parent_elem)
                         count += 1
 
@@ -697,7 +755,7 @@ class MissionConfigMerger:
                         existing_sigs.add(sig)
                         added_any = True
                     if added_any:
-                        root.append(ET.Comment(f" MERGED items from {entry.source_mod} into {unique_key} "))
+                        root.append(ET.Comment(f" MERGED items from {self._display_mod_name(entry.source_mod)} into {unique_key} "))
                 else:
                     # Replace: remove existing entries with same key and append the selected one
                     for ch in _find_children_by_key(root, unique_key):
@@ -705,7 +763,7 @@ class MissionConfigMerger:
                             root.remove(ch)
                         except ValueError:
                             pass
-                    root.append(ET.Comment(f" RESOLVED CONFLICT (replace) from {entry.source_mod} "))
+                    root.append(ET.Comment(f" RESOLVED CONFLICT (replace) from {self._display_mod_name(entry.source_mod)} "))
                     root.append(_clone_element(entry.element))
                     count += 1
                 
@@ -716,7 +774,7 @@ class MissionConfigMerger:
                     if str(getattr(entry, "unique_key", "")) in resolved_keys:
                         continue
                     comment = ET.Comment(
-                        f" CONFLICT: Overwrites existing entry. Source: {entry.source_mod} "
+                        f" CONFLICT: Overwrites existing entry. Source: {self._display_mod_name(entry.source_mod)} "
                     )
                     root.append(comment)
                     root.append(entry.element)
