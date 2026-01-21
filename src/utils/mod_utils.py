@@ -192,13 +192,68 @@ def scan_workshop_mods(
     # Get installed mods for status check
     installed_mods = {}
     if server_path and server_path.exists():
+        # Try to load name mappings so we can map short @mN names back to originals
+        name_manager = None
+        try:
+            from src.core.mod_name_manager import ModNameManager
+            name_manager = ModNameManager(server_path)
+        except Exception:
+            name_manager = None
+
         for item in server_path.iterdir():
             if item.is_dir() and item.name.startswith("@"):
                 version = get_mod_version(item)
+                # Always register the actual folder name (short or original)
                 installed_mods[item.name.lower()] = version
+                # If this folder is a shortened name, try to resolve original and register that as installed too
+                try:
+                    if name_manager:
+                        original = name_manager.get_original_name(item.name)
+                        if original and original.lower() != item.name.lower():
+                            installed_mods[original.lower()] = version
+                        # Also register any additional shorts that map to the same original
+                        for extra_short in name_manager.get_all_shorts_for_original(original):
+                            if extra_short:
+                                installed_mods[f"@{extra_short}".lower()] = version
+                except Exception:
+                    pass
     
     # Scan workshop structure (workshop_id/mod_folder pattern)
     found_any = False
+    def _is_installed_name(mod_name: str, installed_map: dict, nm_mgr) -> bool:
+        """Check multiple variants to determine if mod_name is installed."""
+        if not mod_name:
+            return False
+        key = str(mod_name).lower()
+        # Direct match (with @)
+        if key in installed_map:
+            return True
+        # Without @ prefix
+        without_at = key.lstrip("@")
+        if without_at in installed_map:
+            return True
+        # With @ prefix (ensure)
+        if not key.startswith("@") and f"@{without_at}" in installed_map:
+            return True
+        # If name manager available, check mapped shorts for this original
+        try:
+            if nm_mgr:
+                # If provided mod_name is a short, resolve original
+                orig = nm_mgr.get_original_name(mod_name)
+                if orig and orig.lower() in installed_map:
+                    return True
+                # Check all known shorts for this original
+                shorts = nm_mgr.get_all_shorts_for_original(mod_name)
+                for s in shorts:
+                    if s and f"@{s}".lower() in installed_map:
+                        return True
+                # Also check mod_id-based shortened name
+                # (not always available here)
+        except Exception:
+            pass
+        return False
+
+
     for id_dir in sorted([p for p in workshop_path.iterdir() if p.is_dir()]):
         workshop_id = id_dir.name
         mod_dirs = [p for p in id_dir.iterdir() if p.is_dir() and p.name.startswith("@")]
@@ -208,7 +263,7 @@ def scan_workshop_mods(
         for mod_dir in sorted(mod_dirs):
             version = get_mod_version(mod_dir)
             size = get_folder_size(mod_dir)
-            is_installed = mod_dir.name.lower() in installed_mods
+            is_installed = _is_installed_name(mod_dir.name, installed_mods, name_manager)
             install_date = get_mod_install_date(mod_dir)
             items.append((workshop_id, mod_dir.name, version, size, is_installed, install_date))
     
@@ -217,7 +272,7 @@ def scan_workshop_mods(
         for mod_dir in sorted([p for p in workshop_path.iterdir() if p.is_dir() and p.name.startswith("@")]):
             version = get_mod_version(mod_dir)
             size = get_folder_size(mod_dir)
-            is_installed = mod_dir.name.lower() in installed_mods
+            is_installed = _is_installed_name(mod_dir.name, installed_mods, name_manager)
             install_date = get_mod_install_date(mod_dir)
             items.append(("local", mod_dir.name, version, size, is_installed, install_date))
     

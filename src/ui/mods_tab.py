@@ -322,10 +322,45 @@ class ModsTab(BaseTab):
             # Get installed versions and dates for comparison
             installed_mods = {}
             installed_dates = {}
+            name_manager = None
+            try:
+                if server_path and server_path.exists():
+                    name_manager = ModNameManager(server_path)
+            except Exception:
+                name_manager = None
+            
             if server_path and server_path.exists():
                 for item in server_path.iterdir():
                     if item.is_dir() and item.name.startswith("@"):
-                        installed_mods[item.name.lower()] = get_mod_version(item)
+                        ver = get_mod_version(item)
+                        # Register multiple name variants to improve matching:
+                        # - actual folder name (with @)
+                        # - without @
+                        # - resolved original name from mapping (with @)
+                        # - any other shorts that map to the same original
+                        try:
+                            folder_name = item.name
+                            installed_mods[folder_name.lower()] = ver
+                            installed_mods[folder_name.lstrip("@").lower()] = ver
+
+                            # Map to original name if optimized
+                            original_name = name_manager.get_original_name(item.name) if name_manager else item.name
+                            if original_name:
+                                installed_mods[original_name.lower()] = ver
+                                installed_mods[original_name.lstrip("@").lower()] = ver
+
+                            # Also include other shorts for the same original
+                            if name_manager:
+                                try:
+                                    for s in name_manager.get_all_shorts_for_original(original_name):
+                                        if s:
+                                            installed_mods[f"@{s}".lower()] = ver
+                                            installed_mods[s.lower()] = ver
+                                except Exception:
+                                    pass
+
+                        except Exception:
+                            pass
                         # Get server install date for highlighting outdated mods
                         from src.utils.mod_utils import get_folder_install_date
                         installed_dates[item.name.lower()] = get_folder_install_date(item)
