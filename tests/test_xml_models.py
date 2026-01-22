@@ -2,7 +2,7 @@
 import sys
 sys.path.insert(0, "D:\\Personal_Projects\\DayzModManager")
 
-from src.models.xml_config_models import (
+from features.config.models.xml_config_models import (
     ConfigTypeRegistry, XMLMergeHelper, 
     TypesXMLModel, SpawnableTypesXMLModel, RandomPresetsXMLModel,
     EventsXMLModel, EventSpawnsXMLModel, IgnoreListXMLModel,

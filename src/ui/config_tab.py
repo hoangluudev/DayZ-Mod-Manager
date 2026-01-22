@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint
 
-from src.ui.widgets import IconButton
-from src.ui.theme_manager import ThemeManager
-from src.utils.locale_manager import tr
-from src.core.process_utils import is_dayz_server_running
+from shared.ui.widgets import IconButton
+from shared.ui.theme_manager import ThemeManager
+from shared.utils.locale_manager import tr
+from shared.core.process_utils import is_dayz_server_running
 
 
 # Configuration field definitions with tooltips

@@ -20,12 +20,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QAction, QIcon
 
-from src.core.app_config import get_version, get_app_name, get_app_description
-from src.core.settings_manager import SettingsManager
-from src.core.profile_manager import ProfileManager
-from src.core.default_restore import restore_server_defaults
-from src.utils.locale_manager import LocaleManager, tr
-from src.constants import (
+from shared.core.app_config import get_version, get_app_name, get_app_description
+from features.settings.core.settings_manager import SettingsManager
+from features.profiles.core.profile_manager import ProfileManager
+from shared.core.default_restore import restore_server_defaults
+from shared.utils.locale_manager import LocaleManager, tr
+from constants import (
     SIDEBAR_ITEMS,
     TabIndex,
     WindowDimensions,
@@ -33,15 +33,15 @@ from src.constants import (
 )
 
 # Import UI components
-from src.ui.sidebar_widget import SidebarWidget
-from src.ui.theme_manager import ThemeManager
-from src.ui.profiles_tab import ProfilesTab
-from src.ui.mods_tab import ModsTab
-from src.ui.unified_config_tab import UnifiedConfigTab
-from src.ui.settings_tab import SettingsTab
-from src.ui.icons import Icons
-from src.ui.widgets import IconButton
-from src.ui.config_manager import UnsavedChangesDialog
+from shared.ui.sidebar_widget import SidebarWidget
+from shared.ui.theme_manager import ThemeManager
+from features.profiles.ui.profiles_tab import ProfilesTab
+from features.mods.ui.mods_tab import ModsTab
+from features.config.ui.unified_config_tab import UnifiedConfigTab
+from features.settings.ui.settings_tab import SettingsTab
+from shared.ui.icons import Icons
+from shared.ui.widgets import IconButton
+from features.config.ui.config_manager import UnsavedChangesDialog
 
 
 class ProcessManager:
@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
 
         # First-run bootstrap (creates default configs in writable storage)
         try:
-            from src.core.storage_paths import bootstrap_first_run
+            from shared.core.storage_paths import bootstrap_first_run
             bootstrap_first_run()
         except Exception:
             pass

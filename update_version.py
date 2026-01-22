@@ -4,7 +4,7 @@ Version Update Script
 Demonstrates how to update application version centrally.
 """
 
-from src.core.app_config import AppConfigManager
+from shared.core.app_config import AppConfigManager
 
 def main():
     """Update application version."""
