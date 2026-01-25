@@ -88,6 +88,21 @@ class ConfigChangeManager(QObject):
     def has_unsaved_changes(self) -> bool:
         """Check if there are unsaved changes."""
         return self._has_changes
+
+    def has_unsaved_changes_for(self, scope: str) -> bool:
+        """Check if there are unsaved changes for a specific scope.
+
+        Args:
+            scope: "launcher" or "server_config"
+        """
+        if self._original is None or self._current is None:
+            return False
+
+        if scope == "launcher":
+            return self._original.launcher != self._current.launcher
+        if scope == "server_config":
+            return self._original.server_config != self._current.server_config
+        raise ValueError(f"Unknown scope: {scope}")
     
     def get_changes_summary(self) -> Dict[str, List[tuple]]:
         """
@@ -129,6 +144,66 @@ class ConfigChangeManager(QObject):
             self.changes_detected.emit(False)
             return self._current
         return None
+
+    def restore_original_for(self, scope: str) -> Optional[ConfigSnapshot]:
+        """Restore current state to original for a specific scope."""
+        if self._original is None:
+            return None
+        if self._current is None:
+            self._current = ConfigSnapshot()
+
+        if scope == "launcher":
+            self._current.launcher = copy.deepcopy(self._original.launcher)
+        elif scope == "server_config":
+            self._current.server_config = copy.deepcopy(self._original.server_config)
+        else:
+            raise ValueError(f"Unknown scope: {scope}")
+
+        self._check_changes()
+        return self._current
+    
+    def reset_to_defaults_for(self, scope: str) -> Optional[ConfigSnapshot]:
+        """Reset current state to defaults for a specific scope."""
+        from constants.config import LAUNCHER_DEFAULTS, CONFIG_FIELDS
+        
+        if self._current is None:
+            self._current = ConfigSnapshot()
+
+        if scope == "launcher":
+            # Reset launcher to defaults
+            self._current.launcher = {
+                "server_name": LAUNCHER_DEFAULTS.server_name,
+                "config_file": LAUNCHER_DEFAULTS.config_file,
+                "port": LAUNCHER_DEFAULTS.port,
+                "cpu_count": LAUNCHER_DEFAULTS.cpu_count,
+                "timeout": LAUNCHER_DEFAULTS.timeout,
+                "do_logs": LAUNCHER_DEFAULTS.do_logs,
+                "admin_log": LAUNCHER_DEFAULTS.admin_log,
+                "net_log": LAUNCHER_DEFAULTS.net_log,
+                "freeze_check": LAUNCHER_DEFAULTS.freeze_check,
+                "use_mods_file": LAUNCHER_DEFAULTS.use_mods_file,
+                "server_location": "",  # Keep empty, user sets this
+                "mods": "",
+                "server_mods": "",
+                "profiles": "",
+                "additional_flags": "",
+            }
+        elif scope == "server_config":
+            # Reset server config to defaults
+            self._current.server_config = {
+                key: field_def.default for key, field_def in CONFIG_FIELDS.items()
+            }
+            # Add mission/map defaults
+            self._current.server_config.update({
+                "template": "dayzOffline.chernarusplus",
+                "difficulty": "Recruit",
+                "class": "DayZ",
+            })
+        else:
+            raise ValueError(f"Unknown scope: {scope}")
+
+        self._check_changes()
+        return self._current
     
     def mark_saved(self):
         """Mark current state as saved (becomes new original)."""
@@ -136,6 +211,22 @@ class ConfigChangeManager(QObject):
             self._original = self._current.copy()
             self._has_changes = False
             self.changes_detected.emit(False)
+
+    def mark_saved_for(self, scope: str) -> None:
+        """Mark a specific scope as saved (becomes new original for that scope)."""
+        if self._current is None:
+            return
+        if self._original is None:
+            self._original = ConfigSnapshot()
+
+        if scope == "launcher":
+            self._original.launcher = copy.deepcopy(self._current.launcher)
+        elif scope == "server_config":
+            self._original.server_config = copy.deepcopy(self._current.server_config)
+        else:
+            raise ValueError(f"Unknown scope: {scope}")
+
+        self._check_changes()
     
     def get_current_state(self) -> Optional[ConfigSnapshot]:
         """Get the current configuration state."""

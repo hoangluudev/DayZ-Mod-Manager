@@ -26,6 +26,26 @@ def format_file_size(size_bytes: int | float) -> str:
         return f"{kb:.1f} KB"
 
 
+def parse_file_size(size_str: str) -> float:
+    """Parse formatted file size back to bytes."""
+    if not size_str or size_str == "-":
+        return 0.0
+    
+    size_str = size_str.strip().upper()
+    if size_str.endswith("GB"):
+        return float(size_str[:-2]) * (1024 * 1024 * 1024)
+    elif size_str.endswith("MB"):
+        return float(size_str[:-2]) * (1024 * 1024)
+    elif size_str.endswith("KB"):
+        return float(size_str[:-2]) * 1024
+    else:
+        # Assume bytes if no unit
+        try:
+            return float(size_str)
+        except ValueError:
+            return 0.0
+
+
 def get_mod_version(mod_path: Path) -> str | None:
     """Extract version from mod's meta.cpp or mod.cpp."""
     try:

@@ -46,7 +46,6 @@ from features.config.models.xml_config_models import (
 )
 from shared.ui.widgets.icon_button import IconButton
 from shared.ui.widgets.lazy_loading_dialog import LazyLoadingDialog
-from shared.ui.dialogs.conflict_resolver_dialog import ConflictResolverDialog
 from shared.utils.locale_manager import tr
 from features.mods.core.mod_name_manager import ModNameManager
 
@@ -360,8 +359,8 @@ class MissionConfigMergeDialog(QDialog):
         valid_tab = QWidget()
         valid_layout = QVBoxLayout(valid_tab)
         valid_layout.setContentsMargins(4, 4, 4, 4)
-
-        # Hint for double-click (left-click toggles checkbox)
+        
+        # Hint for double-click
         hint_label = QLabel("Double-click a row to view file details")
         hint_label.setStyleSheet("color: gray; font-size: 11px;")
         valid_layout.addWidget(hint_label)
@@ -381,11 +380,13 @@ class MissionConfigMergeDialog(QDialog):
         self.tbl_sources.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_sources.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl_sources.verticalHeader().setDefaultSectionSize(32)
-        # Use ReusableTable defaults and avoid hard-coded numeric header indexes.
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(5, QHeaderView.Interactive)
+        self.tbl_sources.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.tbl_sources.setColumnWidth(4, 140)
+        self.tbl_sources.setColumnWidth(5, 180)
         self.tbl_sources.verticalHeader().setVisible(False)
         self.tbl_sources.set_row_click_toggles_checkbox(True)
-        self.tbl_sources.checkbox_toggled.connect(lambda _row, _checked: (self._update_new_files_count(), self._refresh_mapping_warnings()))
-        self.tbl_sources.row_double_clicked.connect(self._on_source_file_double_clicked)
+        self.tbl_sources.row_double_clicked.connect(self._on_source_file_selected)
         self.tbl_sources.setMinimumHeight(300)
         self.tbl_sources.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         valid_layout.addWidget(self.tbl_sources)
@@ -397,6 +398,12 @@ class MissionConfigMergeDialog(QDialog):
         invalid_layout = QVBoxLayout(invalid_tab)
         invalid_layout.setContentsMargins(4, 4, 4, 4)
         
+        invalid_info = QLabel(tr("mission_merge.invalid_files_info"))
+        invalid_info.setStyleSheet("color: #ff9800; font-size: 11px;")
+        invalid_info.setWordWrap(True)
+        invalid_layout.addWidget(invalid_info)
+        
+        # Hint for double-click
         invalid_hint = QLabel("Double-click a row to view file details")
         invalid_hint.setStyleSheet("color: gray; font-size: 11px;")
         invalid_layout.addWidget(invalid_hint)
@@ -413,9 +420,11 @@ class MissionConfigMergeDialog(QDialog):
         self.tbl_invalid_sources.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_invalid_sources.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl_invalid_sources.verticalHeader().setDefaultSectionSize(28)
-        # Avoid numeric column index overrides; let ReusableTable manage resize modes.
+        self.tbl_invalid_sources.setColumnWidth(0, 180)
+        self.tbl_invalid_sources.setColumnWidth(3, 300)
         self.tbl_invalid_sources.verticalHeader().setVisible(False)
-        self.tbl_invalid_sources.row_double_clicked.connect(self._on_invalid_file_double_clicked)
+        self.tbl_invalid_sources.set_row_click_toggles_checkbox(True)
+        self.tbl_invalid_sources.row_double_clicked.connect(self._on_invalid_file_selected)
         self.tbl_invalid_sources.setMinimumHeight(200)
         self.tbl_invalid_sources.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         invalid_layout.addWidget(self.tbl_invalid_sources)
@@ -491,6 +500,7 @@ class MissionConfigMergeDialog(QDialog):
         self.tbl_targets.setColumnWidth(0, 200)
         self.tbl_targets.verticalHeader().setVisible(False)
         self.tbl_targets.verticalHeader().setDefaultSectionSize(28)
+        self.tbl_targets.set_row_click_toggles_checkbox(True)
         self.tbl_targets.setMinimumHeight(200)
 
         self.tbl_targets.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -523,11 +533,6 @@ class MissionConfigMergeDialog(QDialog):
         # XML content
         self.txt_file_preview = QTextEdit()
         self.txt_file_preview.setReadOnly(True)
-        # Keep layout stable: always reserve vertical scrollbar space.
-        try:
-            self.txt_file_preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        except Exception:
-            pass
         self.txt_file_preview.setFont(QFont("Consolas", 10))
         self.txt_file_preview.setStyleSheet("""
             QTextEdit {
@@ -536,30 +541,37 @@ class MissionConfigMergeDialog(QDialog):
                 border: 1px solid #3c3c3c;
             }
         """)
+        self.txt_file_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.txt_file_preview.setMinimumHeight(200)
         layout.addWidget(self.txt_file_preview)
         
         return widget
-
-    def _on_source_file_double_clicked(self, row: int):
-        """Open preview for a source file on double-click."""
-        if row < 0 or self.tbl_sources.is_group_header(row):
+    
+    def _on_source_file_selected(self, row: int):
+        """Handle double-click on source files table row."""
+        # Skip if this is a group header
+        if self.tbl_sources.is_group_header(row):
             return
+
         row_data = self.tbl_sources.get_row_data(row)
         if not row_data or not row_data.get("_file_path"):
             return
-        self._preview_xml_file(Path(row_data["_file_path"]))
 
-    def _on_invalid_file_double_clicked(self, row: int):
-        """Open preview for an invalid file on double-click."""
-        if row < 0:
-            return
+        file_path = Path(row_data["_file_path"])
+
+        # Update file preview tab
+        self._preview_xml_file(file_path)
+    
+    def _on_invalid_file_selected(self, row: int):
+        """Handle double-click on invalid files table row."""
         row_data = self.tbl_invalid_sources.get_row_data(row)
-        if not row_data:
+        if not row_data or not row_data.get("path", {}).get("text"):
             return
-        path_text = (row_data.get("path") or {}).get("text")
-        if not path_text:
-            return
-        self._preview_text_file(Path(str(path_text)))
+
+        file_path = Path(row_data["path"]["text"])
+
+        # Preview as text (not XML)
+        self._preview_text_file(file_path)
     
     def _preview_xml_file(self, file_path: Path):
         """Preview a file as XML."""
@@ -1062,25 +1074,8 @@ class MissionConfigMergeDialog(QDialog):
                 except Exception:
                     entries = "?"
 
-            # Human-readable tooltip (no raw dict/json)
-            try:
-                root_tag = self._get_target_parent_tag(filename)
-            except Exception:
-                root_tag = ""
-
-            tooltip_lines = [
-                filename,
-                f"{tr('mission_merge.col_path')}: {file_path}",
-            ]
-            if root_tag:
-                tooltip_lines.append(f"Root: {root_tag}")
-            tooltip_lines.append(f"{tr('mission_merge.exists')}: {'Yes' if exists else 'No'}")
-            tooltip_lines.append(f"{tr('mission_merge.entries')}: {entries}")
-            tooltip_lines.append(tr("mission_merge.double_click_to_view_details"))
-            row_tooltip = "\n".join([t for t in tooltip_lines if t])
-
             table_data.append({
-                "file": {"text": filename, "tooltip": row_tooltip},
+                "file": {"text": filename},
                 "exists": {"text": "✓" if exists else "-"},
                 "entries": {"text": entries},
                 "planned_changes": {"text": "-"},
@@ -1138,7 +1133,6 @@ class MissionConfigMergeDialog(QDialog):
 
             planned_changes = "-"
             planned_mods = "-"
-            mods_tooltip = ""
 
             if preview and filename in getattr(preview, "merge_results", {}):
                 result = preview.merge_results.get(filename)
@@ -1181,8 +1175,6 @@ class MissionConfigMergeDialog(QDialog):
                 except Exception:
                     mods_display = mods_list
 
-                mods_tooltip = "\n".join(mods_display) if mods_display else ""
-
                 if not mods_display:
                     planned_mods = "-"
                 elif len(mods_display) <= 3:
@@ -1192,11 +1184,7 @@ class MissionConfigMergeDialog(QDialog):
 
             # Update the table data
             self.tbl_targets.set_cell_data(row, "planned_changes", {"text": planned_changes})
-            self.tbl_targets.set_cell_data(
-                row,
-                "planned_mods",
-                {"text": planned_mods, "tooltip": mods_tooltip} if mods_tooltip else {"text": planned_mods},
-            )
+            self.tbl_targets.set_cell_data(row, "planned_mods", {"text": planned_mods})
 
     def _populate_sources_table(self, mod_infos: list[ModConfigInfo]):
         """Populate left tables with source XML files from mods - split into valid/invalid."""
@@ -1243,7 +1231,7 @@ class MissionConfigMergeDialog(QDialog):
                 # Create group for this mod
                 mod_group = TableGroup(
                     name=display_mod_name,
-                    display_name=f"📦 {display_mod_name}",
+                    display_name=f"{display_mod_name}",
                     rows=group_rows,
                     expanded=True
                 )
@@ -1260,9 +1248,6 @@ class MissionConfigMergeDialog(QDialog):
 
         # Set data to invalid sources table
         self.tbl_invalid_sources.set_data(invalid_table_data)
-
-        # Set data with groups to ReusableTable
-        self.tbl_sources.set_data_with_groups(groups_data)
 
         # Update tab titles with counts
         self.source_tabs.setTabText(0, f"{tr('mission_merge.tab_valid_files')} ({valid_count})")
@@ -1297,12 +1282,29 @@ class MissionConfigMergeDialog(QDialog):
         # Get merge suggestion from model
         action, suggested_target = self._get_merge_suggestion(config_file, model_class)
 
-        status_cell = self._compute_source_status(
-            action=action,
-            model_class=model_class,
-            config_type_name=config_type_name,
-            target_file=suggested_target,
-        )
+        # Compute initial status text (do not default everything to OK).
+        status_text = tr("mission_merge.status_ok")
+        status_color = QColor("#607d8b")
+        try:
+            if action == "merge":
+                if detected_model:
+                    expected_target = self._get_expected_target(detected_model)
+                    if expected_target and suggested_target and str(suggested_target).lower() != str(expected_target).lower():
+                        status_text = tr("mission_merge.status_type_mismatch").format(expected=expected_target)
+                        status_color = QColor("#f44336")
+                    else:
+                        merge_strategy = detected_model.get_merge_strategy()
+                        status_text = f"✓ {self._strategy_label(merge_strategy)}"
+                        status_color = QColor("#4caf50")
+                elif config_type_name == "Unknown":
+                    status_text = tr("mission_merge.status_unknown_type")
+                    status_color = QColor("#ff9800")
+            elif action == "copy":
+                status_text = tr("mission_merge.status_copy")
+                status_color = QColor("#2196f3")
+        except Exception:
+            status_text = tr("mission_merge.status_ok")
+            status_color = QColor("#607d8b")
 
         # Create tooltip for type
         type_tooltip = ""
@@ -1372,7 +1374,8 @@ class MissionConfigMergeDialog(QDialog):
                 "callback": lambda _row, _data: self._on_source_row_changed(_row),
             },
             "status": {
-                **status_cell,
+                "text": status_text,
+                "color": status_color
             },
             # Store additional data for processing
             "_file_path": str(config_file),
@@ -1435,56 +1438,38 @@ class MissionConfigMergeDialog(QDialog):
         config_type_name = row_data.get("_config_type") or "Unknown"
         target_file = target_combo.currentData()
 
-        status_cell = self._compute_source_status(
-            action=action,
-            model_class=model_class,
-            config_type_name=config_type_name,
-            target_file=target_file,
-        )
-        self.tbl_sources.set_cell_data(row, "status", status_cell)
-
-        self._update_new_files_count()
-        self._refresh_mapping_warnings()
-
-    def _compute_source_status(
-        self,
-        *,
-        action: str,
-        model_class: Optional[Type],
-        config_type_name: str,
-        target_file: Optional[str],
-    ) -> dict:
-        """Compute the status cell for a source row.
-
-        Status should reflect the chosen merge method/strategy (or copy), and always include a tooltip
-        for truncated display in a fixed-width column.
-        """
+        # Update status cell
         status_text = tr("mission_merge.status_ok")
         status_color = QColor("#607d8b")
 
         if action == "merge":
             if model_class:
+                # Check if selected target matches expected model target
                 expected_target = self._get_expected_target(model_class)
                 if expected_target and target_file and target_file.lower() != expected_target.lower():
+                    # Wrong target selected
                     status_text = tr("mission_merge.status_type_mismatch").format(expected=expected_target)
                     status_color = QColor("#f44336")
                 else:
+                    # Good merge
                     merge_strategy = model_class.get_merge_strategy()
-                    status_text = self._strategy_label(merge_strategy)
+                    status_text = f"✓ {self._strategy_label(merge_strategy)}"
                     status_color = QColor("#4caf50")
             elif config_type_name == "Unknown":
                 status_text = tr("mission_merge.status_unknown_type")
                 status_color = QColor("#ff9800")
-
         elif action == "copy":
             status_text = tr("mission_merge.status_copy")
             status_color = QColor("#2196f3")
 
-        return {
+        # Update status cell
+        self.tbl_sources.set_cell_data(row, "status", {
             "text": status_text,
-            "color": status_color,
-            "tooltip": status_text,
-        }
+            "color": status_color
+        })
+
+        self._update_new_files_count()
+        self._refresh_mapping_warnings()
 
     def _refresh_mapping_warnings(self):
         """Aggregate invalid merge mappings and show a compact warning summary."""
@@ -1579,7 +1564,7 @@ class MissionConfigMergeDialog(QDialog):
         loading = LazyLoadingDialog(
             title=tr("mission_merge.generating_preview"),
             message=tr("mission_merge.analyzing"),
-            parent=self,
+            parent=self
         )
         loading.show()
         
@@ -1772,7 +1757,7 @@ class MissionConfigMergeDialog(QDialog):
                 mod_item = mod_groups.get(mod_name)
                 if mod_item is None:
                     mod_item = QTreeWidgetItem()
-                    mod_item.setText(0, f"📦 {display_group_name}")
+                    mod_item.setText(0, f"� {display_group_name}")
                     mod_item.setFont(0, QFont("", -1, QFont.Bold))
                     mod_item.setForeground(0, QColor("#4fc3f7"))
                     file_item.addChild(mod_item)
@@ -2059,7 +2044,7 @@ class MissionConfigMergeDialog(QDialog):
         self.setWindowTitle(tr("mission_merge.title"))
 
 
-class _LegacyConflictResolverDialog(QDialog):
+class ConflictResolverDialog(QDialog):
     """
     Dialog for resolving merge conflicts.
     
@@ -2093,6 +2078,26 @@ class _LegacyConflictResolverDialog(QDialog):
         except Exception:
             pass
         return str(mod_name or "")
+
+    def _entry_key(self, entry) -> str:
+        """Return a stable key for a conflict entry across refreshes."""
+        try:
+            uk = getattr(entry, "unique_key", None)
+            if uk:
+                return str(uk)
+        except Exception:
+            pass
+        try:
+            # Fallback: combine source + name-ish.
+            src_mod = str(getattr(entry, "source_mod", "") or "")
+            src_file = str(getattr(getattr(entry, "source_file", None), "name", "") or "")
+            name = ""
+            el = getattr(entry, "element", None)
+            if el is not None:
+                name = str(el.get("name") or "")
+            return f"{src_mod}|{src_file}|{name}"
+        except Exception:
+            return str(id(entry))
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -2114,7 +2119,18 @@ class _LegacyConflictResolverDialog(QDialog):
         
         # Status bar showing unresolved conflicts
         self.status_bar = QLabel()
-        self.status_bar.setStyleSheet("color: #ff9800; font-weight: bold; padding: 8px;")
+        self.status_bar.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-weight: bold;
+                padding: 12px;
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2d2d2d, stop:1 #1e1e1e);
+                border: 1px solid #3c3c3c;
+                border-radius: 6px;
+                margin: 4px;
+            }
+        """)
         layout.addWidget(self.status_bar)
 
         # Force apply toggle (bypass strict validation/gating)
@@ -2200,6 +2216,8 @@ class _LegacyConflictResolverDialog(QDialog):
         conflicts_by_key = {}
         for entry in entries:
             key = entry.unique_key
+            if not key:  # Assign default key for entries with empty/None unique_key
+                key = f"unknown:{id(entry)}"
             if key not in conflicts_by_key:
                 conflicts_by_key[key] = []
             conflicts_by_key[key].append(entry)
@@ -2218,9 +2236,31 @@ class _LegacyConflictResolverDialog(QDialog):
         
         conflict_list = QListWidget()
         conflict_list.setAlternatingRowColors(False)
+        conflict_list.setStyleSheet("""
+            QListWidget {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #2d2d2d;
+            }
+            QListWidget::item:selected {
+                background-color: #404040;
+                color: #ffffff;
+            }
+            QListWidget::item:hover {
+                background-color: #333333;
+            }
+        """)
         for key in conflicts_by_key.keys():
+            entries_for_key = conflicts_by_key[key]
+            if len(entries_for_key) <= 1:
+                continue  # Skip non-conflicts (only one entry)
             base_label = key.split(":", 1)[-1] if ":" in key else key
-            entry_count = len(conflicts_by_key[key])
+            entry_count = len(entries_for_key)
             item = QListWidgetItem(f"{base_label} ({tr('mission_merge.conflict_entry_count', count=entry_count)})")
             item.setData(Qt.UserRole, key)
             item.setData(Qt.UserRole + 1, base_label)
@@ -2236,16 +2276,14 @@ class _LegacyConflictResolverDialog(QDialog):
         options_layout = QVBoxLayout(options_tab)
         options_layout.setContentsMargins(4, 4, 4, 4)
         
-        # Current state label
+        # Current state label and auto-pick controls
         state_row = QHBoxLayout()
 
         state_label = QLabel(tr("mission_merge.conflict_current_state", state=tr("mission_merge.conflict_state_none")))
         state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
         state_row.addWidget(state_label, stretch=1)
 
-        btn_auto_pick = QPushButton(tr("mission_merge.auto_pick_file"))
-        btn_auto_pick.setToolTip(tr("mission_merge.auto_pick_file_tooltip"))
-        state_row.addWidget(btn_auto_pick)
+        # Auto-pick dropdown menu will be added after tab_data is created
 
         options_layout.addLayout(state_row)
 
@@ -2253,22 +2291,62 @@ class _LegacyConflictResolverDialog(QDialog):
         remaining_label.setStyleSheet("color: gray; font-size: 11px;")
         options_layout.addWidget(remaining_label)
         
-        # Options table - simplified: no Action column
-        options_table = QTableWidget()
-        options_table.setColumnCount(4)
+        # Options table
+        from shared.ui.components.table import ReusableTable, TableColumn
+        # Keep the original conflict-resolve workflow: pick one (replace) or multiple (merge where supported).
+        # Do not expose per-row Action/MergeInto columns here.
+        options_columns = [
+            TableColumn("source_mod", tr("mission_merge.source_mod"), QHeaderView.ResizeToContents),
+            TableColumn("entry_preview", tr("mission_merge.entry_preview"), QHeaderView.Stretch),
+            TableColumn("status", tr("mission_merge.status"), QHeaderView.ResizeToContents),
+        ]
+        options_table = ReusableTable(options_columns, has_checkbox=True)
+        # Row click toggles checkbox (primary interaction) while keeping UI clean.
+        options_table.set_row_click_toggles_checkbox(True)
         options_table.setAlternatingRowColors(False)
-        options_table.setHorizontalHeaderLabels([
-            "",  # Checkbox
-            tr("mission_merge.source_mod"),
-            tr("mission_merge.entry_preview"),
-            tr("mission_merge.status"),
-        ])
-        options_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        options_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        options_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        options_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         options_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         options_table.verticalHeader().setVisible(False)
+        options_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                gridline-color: #2d2d2d;
+            }
+            QTableWidget::item {
+                padding: 4px;
+                border-bottom: 1px solid #2d2d2d;
+            }
+            QTableWidget::item:selected {
+                background-color: #404040;
+            }
+            QHeaderView::section {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                padding: 8px;
+                border: none;
+                border-right: 1px solid #3c3c3c;
+                font-weight: bold;
+            }
+            QCheckBox {
+                background-color: transparent;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 2px solid #666;
+                background-color: #1e1e1e;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                border: 2px solid #4caf50;
+                background-color: #4caf50;
+                border-radius: 3px;
+            }
+        """)
         options_layout.addWidget(options_table)
         
         # Entry XML preview
@@ -2330,7 +2408,6 @@ class _LegacyConflictResolverDialog(QDialog):
             "preview_text": preview_text,
             "state_label": state_label,
             "remaining_label": remaining_label,
-            "btn_auto_pick": btn_auto_pick,
             "result_preview": result_preview,
             "resolved_by_key": {},  # {conflict_key: [{entry, action}, ...]}
             "current_key": None,
@@ -2343,13 +2420,16 @@ class _LegacyConflictResolverDialog(QDialog):
         widget._tab_data = tab_data  # type: ignore[attr-defined]
         widget.setProperty("tab_data", tab_data)
         
+        # Auto-pick dropdown menu with multiple options
+        self._create_auto_pick_menu(state_row, tab_data)
+        
         # Connect selection signal
         conflict_list.currentItemChanged.connect(
             lambda curr, prev, td=tab_data: self._on_conflict_selected(td, curr)
         )
 
-        btn_auto_pick.clicked.connect(lambda _=False, td=tab_data: self._auto_pick_file_conflicts(td))
-        
+        # Auto-pick menu is already connected in _create_auto_pick_menu
+
         # Select first item and trigger selection
         if conflict_list.count() > 0:
             conflict_list.setCurrentRow(0)
@@ -2376,60 +2456,50 @@ class _LegacyConflictResolverDialog(QDialog):
 
         # NOTE: Auto-pick is a bulk per-file action via the button.
         
-        # Completely clear the table
-        while options_table.rowCount() > 0:
-            options_table.removeRow(0)
-        
-        # Helper to check whether entry is selected in stored state
-        def _is_entry_selected(conflict_key: str, entry_obj) -> tuple[bool, str]:
-            selected = tab_data["resolved_by_key"].get(conflict_key, [])
-            for sel in selected:
-                if sel.get("entry") is entry_obj:
-                    return True, str(sel.get("action") or "replace")
-            return False, "replace"
-
-        tab_data["_in_change"] = True
+        # Prepare data for ReusableTable
+        table_data = []
+        # Build a stable set of selected entry keys for this conflict.
+        resolved = tab_data["resolved_by_key"].get(key, [])
+        selected_keys = set()
+        for sel in resolved:
+            try:
+                selected_keys.add(self._entry_key(sel.get("entry")))
+            except Exception:
+                continue
         for entry in entries:
-            row = options_table.rowCount()
-            options_table.insertRow(row)
-
-            # Checkbox for selection - simplified: no action column
-            # Selection logic: 1 selected = replace, multiple selected = merge (if supported)
-            selected, _ = _is_entry_selected(key, entry)
-            check_item = QTableWidgetItem("")
-            check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
-            check_item.setData(Qt.UserRole, entry)
-            check_item.setData(Qt.UserRole + 1, key)
-            check_item.setCheckState(Qt.Checked if selected else Qt.Unchecked)
-            options_table.setItem(row, 0, check_item)
-            
-            # Source mod (display name if available)
+            # Check if entry is selected (use stable key, not object identity)
+            selected = (self._entry_key(entry) in selected_keys)
             try:
                 display_mod = self._name_mgr.get_original_name(str(entry.source_mod)) if getattr(self, '_name_mgr', None) else str(entry.source_mod)
             except Exception:
                 display_mod = str(entry.source_mod)
-            mod_item = QTableWidgetItem(display_mod)
-            mod_item.setFlags(mod_item.flags() & ~Qt.ItemIsEditable)
-            options_table.setItem(row, 1, mod_item)
             
-            # Entry preview (truncated)
             xml_str = entry.to_xml_string()
             preview = xml_str[:100] + "..." if len(xml_str) > 100 else xml_str
-            preview_item = QTableWidgetItem(str(preview.replace("\n", " ")))
-            preview_item.setFlags(preview_item.flags() & ~Qt.ItemIsEditable)
-            preview_item.setToolTip(xml_str)
-            options_table.setItem(row, 2, preview_item)
+            
+            status_text = tr("mission_merge.selected") if selected else ""
+            
+            row_data = {
+                "checked": selected,
+                "source_mod": {
+                    "text": display_mod,
+                    "tooltip": display_mod
+                },
+                "entry_preview": {
+                    "text": preview.replace("\n", " "),
+                    "tooltip": xml_str
+                },
+                "status": {
+                    "text": status_text,
+                    "color": QColor("#4caf50") if selected else QColor("#888")
+                },
+                "_entry": entry,
+                "_key": key
+            }
+            table_data.append(row_data)
 
-            # Status
-            status_item = QTableWidgetItem(tr("mission_merge.selected") if selected else "")
-            status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
-            status_item.setForeground(QColor("#4caf50") if selected else QColor("#888"))
-            options_table.setItem(row, 3, status_item)
-
-        tab_data["_in_change"] = False
-
-        # Ensure row visuals match stored state
-        self._refresh_option_row_visuals(tab_data)
+        # Render rows
+        options_table.set_data(table_data)
         
         # Show preview of first entry
         if entries:
@@ -2442,12 +2512,19 @@ class _LegacyConflictResolverDialog(QDialog):
             xml_preview += entries[0].to_xml_string()
             preview_text.setText(xml_preview)
         
-        # Connect handlers once per tab
-        if not tab_data.get("_handlers_connected"):
-            options_table.itemChanged.connect(lambda changed_item, td=tab_data: self._on_option_item_changed(td, changed_item))
-            options_table.itemClicked.connect(lambda clicked_item, td=tab_data: self._on_option_item_changed(td, clicked_item))
-            options_table.cellClicked.connect(lambda r, c, td=tab_data: self._on_option_cell_clicked(td, r, c))
-            tab_data["_handlers_connected"] = True
+        # Connect handler EVERY TIME we set new data (set_data recreates checkboxes)
+        # Store the previous connection lambda if any (to disconnect old one)
+        old_connection = tab_data.get("_checkbox_connection")
+        if old_connection:
+            try:
+                options_table.checkbox_toggled.disconnect(old_connection)
+            except (TypeError, RuntimeError):
+                pass
+        
+        # Connect new handler
+        new_connection = lambda row, checked, td=tab_data: self._on_option_checkbox_toggled(td, row, checked)
+        options_table.checkbox_toggled.connect(new_connection)
+        tab_data["_checkbox_connection"] = new_connection
 
         # Update state label and result preview
         self._update_state_label(tab_data)
@@ -2462,6 +2539,124 @@ class _LegacyConflictResolverDialog(QDialog):
             options_table.viewport().update()
         except Exception:
             pass
+
+    def _on_option_checkbox_toggled(self, tab_data: dict, row: int, checked: bool):
+        """Handle checkbox toggle in options table."""
+        options_table = tab_data["options_table"]
+        is_mergeable = tab_data["is_mergeable"]
+        conflict_key = tab_data.get("current_key")
+        if not conflict_key:
+            return
+
+        # Keep preview in sync with the clicked row.
+        try:
+            self._update_entry_preview_from_tabdata(tab_data, row)
+        except Exception:
+            pass
+
+        # Get entry from row data
+        row_data = options_table.get_row_data(row)
+        if not row_data:
+            return
+        entry = row_data.get("_entry")
+        if not entry:
+            return
+
+        entry_key = self._entry_key(entry)
+
+        # Keep the underlying row model in sync with the widget checkbox state.
+        # Without this, any subsequent refresh can re-create checkboxes from stale
+        # row_data["checked"], which looks like selection/state is not updating.
+        row_data["checked"] = bool(checked)
+
+        # Update stored selections
+        selected_list = list(tab_data["resolved_by_key"].get(conflict_key, []))
+
+        if checked:
+            if not is_mergeable:
+                # Non-mergeable files: only allow ONE selection (radio behavior)
+                # Uncheck others (without re-rendering the whole table).
+                for r, rd in enumerate(options_table._data):
+                    if rd.get("_is_group_header"):
+                        continue
+                    should_check = (r == row)
+                    rd["checked"] = should_check
+                    options_table.set_row_checked(r, should_check)
+                    status_cell = {"text": tr("mission_merge.selected"), "color": QColor("#4caf50")} if should_check else {"text": "", "color": QColor("#888")}
+                    rd["status"] = status_cell
+                    # Always use the same row index for set_cell_data since r is from _data enumeration
+                    options_table.set_cell_data(r, "status", status_cell)
+                
+                tab_data["resolved_by_key"][conflict_key] = [{
+                    "entry": entry,
+                    "action": "replace",
+                }]
+            else:
+                # Mergeable files: allow multi-select
+                selected_list = [s for s in selected_list if self._entry_key(s.get("entry")) != entry_key]
+                selected_list.append({"entry": entry, "action": "merge"})
+                tab_data["resolved_by_key"][conflict_key] = selected_list
+                # Update status for this row
+                status_cell = {"text": tr("mission_merge.selected"), "color": QColor("#4caf50")}
+                row_data["status"] = status_cell
+                options_table.set_cell_data(row, "status", status_cell)
+        else:
+            # Unchecked -> remove from selection
+            selected_list = [s for s in selected_list if self._entry_key(s.get("entry")) != entry_key]
+            if selected_list:
+                tab_data["resolved_by_key"][conflict_key] = selected_list
+            else:
+                tab_data["resolved_by_key"].pop(conflict_key, None)
+            # Update status for this row
+            status_cell = {"text": "", "color": QColor("#888")}
+            row_data["status"] = status_cell
+            options_table.set_cell_data(row, "status", status_cell)
+
+        # Update action based on final selection count for mergeable files
+        self._update_selection_actions(tab_data, conflict_key)
+
+        # Update visuals & counters
+        self._update_conflict_key_marker(tab_data, conflict_key)
+        self._update_state_label(tab_data)
+        self._update_result_preview(tab_data)
+        self._update_remaining_label(tab_data)
+        self._update_status()
+
+    def _on_action_changed(self, tab_data: dict, row: int, row_data: dict):
+        """Handle action combo change."""
+        entry = row_data.get("_entry")
+        key = row_data.get("_key")
+        if not entry or not key:
+            return
+        
+        # Get new action from combo
+        action_combo = tab_data["options_table"].get_cell_widget(row, "action")
+        if isinstance(action_combo, QComboBox):
+            new_action = action_combo.currentData()
+        else:
+            new_action = "replace"
+        
+        # Update resolved
+        resolved = tab_data["resolved_by_key"].get(key, [])
+        for sel in resolved:
+            if sel.get("entry") is entry:
+                sel["action"] = new_action
+                break
+        
+        # Update status if selected
+        if any(sel.get("entry") is entry for sel in resolved):
+            row_data["status"] = {"text": tr("mission_merge.selected"), "color": QColor("#4caf50")}
+            tab_data["options_table"]._render_data()
+        
+        self._update_selection_actions(tab_data, key)
+        self._update_state_label(tab_data)
+        self._update_result_preview(tab_data)
+
+    def _on_target_changed(self, tab_data: dict, row: int, row_data: dict):
+        """Handle target combo change."""
+        # For now, target is per file, not per entry
+        # Could implement per-entry target if needed
+        pass
 
     @staticmethod
     def _deep_signature(elem: ET.Element):
@@ -2485,7 +2680,7 @@ class _LegacyConflictResolverDialog(QDialog):
         children = []
         try:
             for ch in list(elem):
-                children.append(_LegacyConflictResolverDialog._deep_signature(ch))
+                children.append(ConflictResolverDialog._deep_signature(ch))
         except Exception:
             children = []
         return (tag, attrib, text, tuple(children))
@@ -2631,7 +2826,13 @@ class _LegacyConflictResolverDialog(QDialog):
             state_label.setStyleSheet("color: #ff9800; font-weight: bold; padding: 4px; background-color: rgba(255, 152, 0, 0.1);")
         elif len(selections) == 1:
             entry = selections[0]["entry"]
-            name = entry.element.get("name") or entry.source_mod
+            try:
+                if getattr(entry, "element", None) is not None:
+                    name = entry.element.get("name") or entry.source_mod
+                else:
+                    name = getattr(entry, "source_mod", "") or getattr(entry, "unique_key", "")
+            except Exception:
+                name = getattr(entry, "source_mod", "") or getattr(entry, "unique_key", "")
             state_text = tr("mission_merge.conflict_state_replace", name=name)
             state_label.setStyleSheet("color: #4caf50; font-weight: bold; padding: 4px; background-color: rgba(76, 175, 80, 0.1);")
         else:
@@ -2639,6 +2840,11 @@ class _LegacyConflictResolverDialog(QDialog):
             state_label.setStyleSheet("color: #2196f3; font-weight: bold; padding: 4px; background-color: rgba(33, 150, 243, 0.1);")
         
         state_label.setText(tr("mission_merge.conflict_current_state", state=state_text))
+        try:
+            state_label.update()
+            state_label.repaint()
+        except Exception:
+            pass
 
     def _update_remaining_label(self, tab_data: dict):
         """Update per-file remaining/resolved count label."""
@@ -2654,37 +2860,279 @@ class _LegacyConflictResolverDialog(QDialog):
                 resolved += 1
         remaining = max(0, total - resolved)
         lbl.setText(tr("mission_merge.remaining_count", remaining=remaining, total=total))
+        try:
+            lbl.update()
+            lbl.repaint()
+        except Exception:
+            pass
 
-    def _auto_pick_file_conflicts(self, tab_data: dict):
-        """Bulk action: auto-pick conflicts in THIS file when all options are identical."""
+    def _create_auto_pick_menu(self, parent_layout: QHBoxLayout, tab_data: dict):
+        """Create auto-pick dropdown menu with multiple options."""
+        from PySide6.QtWidgets import QComboBox, QMenu
+
+        # Create dropdown button with better styling
+        btn_auto_pick = QPushButton("⚡ " + tr("mission_merge.auto_pick"))
+        btn_auto_pick.setToolTip(tr("mission_merge.auto_pick_tooltip"))
+        btn_auto_pick.setStyleSheet("""
+            QPushButton {
+                background-color: #2196f3;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976d2;
+            }
+            QPushButton:pressed {
+                background-color: #0d47a1;
+            }
+        """)
+
+        # Create menu
+        menu = QMenu(btn_auto_pick)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3c3c3c;
+            }
+            QMenu::item {
+                padding: 8px 16px;
+                border-bottom: 1px solid #404040;
+            }
+            QMenu::item:selected {
+                background-color: #404040;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #404040;
+                margin: 4px 0px;
+            }
+        """)
+
+        # Add menu actions with monochrome icons
+        action_identical = menu.addAction("🔍 " + tr("mission_merge.auto_pick_identical"))
+        action_identical.setToolTip(tr("mission_merge.auto_pick_identical_tooltip"))
+        action_identical.triggered.connect(lambda: self._auto_pick_file_conflicts(tab_data, "identical"))
+
+        action_first_mod = menu.addAction("📁 " + tr("mission_merge.auto_pick_first_mod"))
+        action_first_mod.setToolTip(tr("mission_merge.auto_pick_first_mod_tooltip"))
+        action_first_mod.triggered.connect(lambda: self._auto_pick_file_conflicts(tab_data, "first_mod"))
+
+        action_most_common = menu.addAction("📈 " + tr("mission_merge.auto_pick_most_common"))
+        action_most_common.setToolTip(tr("mission_merge.auto_pick_most_common_tooltip"))
+        action_most_common.triggered.connect(lambda: self._auto_pick_file_conflicts(tab_data, "most_common"))
+
+        menu.addSeparator()
+
+        action_clear_all = menu.addAction("🗑 " + tr("mission_merge.auto_pick_clear_all"))
+        action_clear_all.setToolTip(tr("mission_merge.auto_pick_clear_all_tooltip"))
+        action_clear_all.triggered.connect(lambda: self._auto_pick_file_conflicts(tab_data, "clear_all"))
+
+        # Connect button to show menu
+        btn_auto_pick.clicked.connect(lambda: menu.exec(btn_auto_pick.mapToGlobal(btn_auto_pick.rect().bottomLeft())))
+
+        # Add keyboard shortcut (Ctrl+A)
+        from PySide6.QtGui import QShortcut, QKeySequence
+        shortcut = QShortcut(QKeySequence("Ctrl+A"), btn_auto_pick)
+        shortcut.activated.connect(lambda: menu.exec(btn_auto_pick.mapToGlobal(btn_auto_pick.rect().bottomLeft())))
+
+        # Store menu reference
+        tab_data["auto_pick_menu"] = menu
+        tab_data["btn_auto_pick"] = btn_auto_pick
+        tab_data["auto_pick_shortcut"] = shortcut
+
+        parent_layout.addWidget(btn_auto_pick)
+
+    def _auto_pick_file_conflicts(self, tab_data: dict, strategy: str = "identical"):
+        """Bulk action: auto-pick conflicts in THIS file using specified strategy.
+
+        Strategies:
+        - "identical": Pick when all options are identical (original behavior)
+        - "first_mod": Pick the first entry from each mod (prioritize by mod load order)
+        - "most_common": Pick the most common entry across all conflicts
+        - "clear_all": Clear all selections
+        """
         conflicts_by_key = tab_data.get("conflicts_by_key") or {}
         if not conflicts_by_key:
             return
 
         resolved_by_key = tab_data.get("resolved_by_key") or {}
         picked = 0
+        cleared = 0
 
-        for conflict_key, entries in conflicts_by_key.items():
-            if resolved_by_key.get(conflict_key):
-                continue
-            entries = list(entries or [])
-            if not entries:
-                continue
-            try:
-                sigs = [self._deep_signature(e.element) for e in entries]
-                is_all_same = bool(sigs) and all(s == sigs[0] for s in sigs[1:])
-            except Exception:
-                is_all_same = False
+        # Show progress for operations that might take time
+        show_progress = len(conflicts_by_key) > 10
+        progress = None
+        if show_progress:
+            from PySide6.QtWidgets import QProgressDialog
+            progress = QProgressDialog(
+                tr("mission_merge.auto_pick_progress"),
+                tr("common.cancel"), 0, len(conflicts_by_key), self
+            )
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(False)
+            progress.setAutoReset(False)
+            progress.show()
 
-            if not is_all_same:
-                continue
+        try:
+            if strategy == "clear_all":
+                # Clear all selections
+                for i, conflict_key in enumerate(conflicts_by_key.keys()):
+                    if show_progress and progress:
+                        progress.setValue(i)
+                        progress.setLabelText(f"{tr('mission_merge.auto_pick_clearing')} {i+1}/{len(conflicts_by_key)}")
+                        QApplication.processEvents()
+                        if progress.wasCanceled():
+                            break
 
-            tab_data["resolved_by_key"][conflict_key] = [{
-                "entry": entries[0],
-                "action": "replace",
-            }]
-            self._update_selection_actions(tab_data, conflict_key)
-            picked += 1
+                    if resolved_by_key.get(conflict_key):
+                        resolved_by_key.pop(conflict_key, None)
+                        cleared += 1
+            elif strategy == "identical":
+                # Original behavior: only pick when all options are identical
+                for i, (conflict_key, entries) in enumerate(conflicts_by_key.items()):
+                    if show_progress and progress:
+                        progress.setValue(i)
+                        progress.setLabelText(f"{tr('mission_merge.auto_pick_analyzing')} {i+1}/{len(conflicts_by_key)}")
+                        QApplication.processEvents()
+                        if progress.wasCanceled():
+                            break
+
+                    if resolved_by_key.get(conflict_key):
+                        continue
+                    entries = list(entries or [])
+                    if not entries:
+                        continue
+                    try:
+                        sigs = []
+                        for e in entries:
+                            if e.element is not None:
+                                sigs.append(self._deep_signature(e.element))
+                        is_all_same = bool(sigs) and all(s == sigs[0] for s in sigs[1:])
+                    except Exception:
+                        is_all_same = False
+
+                    if not is_all_same:
+                        continue
+
+                    resolved_by_key[conflict_key] = [{
+                        "entry": entries[0],
+                        "action": "replace",
+                    }]
+                    self._update_selection_actions(tab_data, conflict_key)
+                    picked += 1
+            elif strategy == "first_mod":
+                # Pick first entry from each mod, preferring mods that appear first
+                mod_priority = {}
+                for i, (conflict_key, entries) in enumerate(conflicts_by_key.items()):
+                    if show_progress and progress:
+                        progress.setValue(i)
+                        progress.setLabelText(f"{tr('mission_merge.auto_pick_analyzing')} {i+1}/{len(conflicts_by_key)}")
+                        QApplication.processEvents()
+                        if progress.wasCanceled():
+                            break
+
+                    if resolved_by_key.get(conflict_key):
+                        continue
+
+                    # Group entries by mod
+                    by_mod = {}
+                    for entry in entries:
+                        mod = str(getattr(entry, "source_mod", ""))
+                        if mod not in by_mod:
+                            by_mod[mod] = []
+                        by_mod[mod].append(entry)
+
+                    # Sort mods by priority (first appearance in conflict list)
+                    if not mod_priority:
+                        # Build priority based on first conflict
+                        for mod in by_mod.keys():
+                            mod_priority[mod] = len(mod_priority)
+
+                    sorted_mods = sorted(by_mod.keys(), key=lambda m: mod_priority.get(m, 999))
+
+                    # Pick first entry from first mod
+                    if sorted_mods:
+                        first_mod = sorted_mods[0]
+                        first_entry = by_mod[first_mod][0]
+
+                        resolved_by_key[conflict_key] = [{
+                            "entry": first_entry,
+                            "action": "replace",
+                        }]
+                        self._update_selection_actions(tab_data, conflict_key)
+                        picked += 1
+            elif strategy == "most_common":
+                # Pick the most common entry across all conflicts
+                # This analyzes patterns across the entire file
+                if show_progress and progress:
+                    progress.setLabelText(tr("mission_merge.auto_pick_analyzing_patterns"))
+                    QApplication.processEvents()
+
+                entry_counts = {}
+                for conflict_key, entries in conflicts_by_key.items():
+                    if resolved_by_key.get(conflict_key):
+                        continue
+
+                    for entry in entries:
+                        try:
+                            if entry.element is not None:
+                                sig = self._deep_signature(entry.element)
+                                if sig not in entry_counts:
+                                    entry_counts[sig] = {"count": 0, "entry": entry}
+                                entry_counts[sig]["count"] += 1
+                        except Exception:
+                            continue
+
+                # Find most common signature
+                if entry_counts:
+                    most_common_sig = max(entry_counts.keys(), key=lambda k: entry_counts[k]["count"])
+                    most_common_entry = entry_counts[most_common_sig]["entry"]
+
+                    # Apply to all unresolved conflicts
+                    for i, (conflict_key, entries) in enumerate(conflicts_by_key.items()):
+                        if show_progress and progress:
+                            progress.setValue(i)
+                            progress.setLabelText(f"{tr('mission_merge.auto_pick_applying')} {i+1}/{len(conflicts_by_key)}")
+                            QApplication.processEvents()
+                            if progress.wasCanceled():
+                                break
+
+                        if resolved_by_key.get(conflict_key):
+                            continue
+
+                        # Check if most common entry exists in this conflict
+                        matching_entry = None
+                        for entry in entries:
+                            try:
+                                if entry.element is not None and self._deep_signature(entry.element) == most_common_sig:
+                                    matching_entry = entry
+                                    break
+                            except Exception:
+                                continue
+
+                        if matching_entry:
+                            resolved_by_key[conflict_key] = [{
+                                "entry": matching_entry,
+                                "action": "replace",
+                            }]
+                            self._update_selection_actions(tab_data, conflict_key)
+                            picked += 1
+
+            if show_progress and progress:
+                progress.setValue(len(conflicts_by_key))
+                QApplication.processEvents()
+                progress.close()
+
+        except Exception as e:
+            if show_progress and progress:
+                progress.close()
+            QMessageBox.critical(self, tr("common.error"), str(e))
+            return
 
         # Update all left-list markers
         for conflict_key in conflicts_by_key.keys():
@@ -2699,11 +3147,31 @@ class _LegacyConflictResolverDialog(QDialog):
 
         self._update_remaining_label(tab_data)
         self._update_status()
+        
+        # Force UI update before showing message box
+        QApplication.processEvents()
 
-        if picked <= 0:
-            QMessageBox.information(self, tr("common.info"), tr("mission_merge.auto_pick_not_applicable"))
+        # Show result message
+        if strategy == "clear_all":
+            if cleared > 0:
+                QMessageBox.information(self, tr("common.success"),
+                    tr("mission_merge.auto_pick_cleared", count=cleared))
+            else:
+                QMessageBox.information(self, tr("common.info"),
+                    tr("mission_merge.auto_pick_nothing_to_clear"))
         else:
-            QMessageBox.information(self, tr("common.success"), tr("mission_merge.auto_pick_applied", count=picked))
+            if picked <= 0:
+                QMessageBox.information(self, tr("common.info"),
+                    tr("mission_merge.auto_pick_not_applicable"))
+            else:
+                strategy_names = {
+                    "identical": tr("mission_merge.auto_pick_identical"),
+                    "first_mod": tr("mission_merge.auto_pick_first_mod"),
+                    "most_common": tr("mission_merge.auto_pick_most_common"),
+                }
+                strategy_name = strategy_names.get(strategy, strategy)
+                QMessageBox.information(self, tr("common.success"),
+                    tr("mission_merge.auto_pick_applied_detailed", strategy=strategy_name, count=picked))
     
     def _update_result_preview(self, tab_data: dict):
         """Update the result preview showing merged/replaced result."""
@@ -2724,49 +3192,74 @@ class _LegacyConflictResolverDialog(QDialog):
             result_preview.setText(f"<!-- {tr('mission_merge.conflict_state_none')} -->")
             return
         
-        if len(selections) == 1:
-            # Replace: show the selected entry
-            entry = selections[0]["entry"]
-            xml_preview = f"<!-- {tr('mission_merge.conflict_state_replace', name=self._display_mod_name(entry.source_mod))} -->\n\n"
-            xml_preview += entry.to_xml_string()
-            result_preview.setText(xml_preview)
-        else:
-            # Merge: build combined result
-            xml_preview = f"<!-- {tr('mission_merge.conflict_state_merge', count=len(selections))} -->\n"
-            sources = ", ".join([self._display_mod_name(sel["entry"].source_mod) for sel in selections])
-            xml_preview += f"<!-- Sources: {sources} -->\n\n"
-            
-            # Get first entry as base
-            first_entry = selections[0]["entry"]
-            parent_tag = first_entry.element.tag
-            parent_attrs = dict(first_entry.element.attrib)
-            
-            # Collect all children with deduplication using XMLMergeHelper
-            all_children = []
-            seen_signatures = set()
-            
-            for sel in selections:
-                entry = sel["entry"]
-                for child in entry.element:
-                    sig = XMLMergeHelper.get_element_signature(child)
-                    if sig not in seen_signatures:
-                        cloned = ET.Element(child.tag, child.attrib)
-                        cloned.text = child.text
-                        cloned.tail = child.tail
-                        for subchild in child:
-                            cloned.append(subchild)
-                        all_children.append(cloned)
-                        seen_signatures.add(sig)
-            
-            # Build merged XML
-            attrs_str = " ".join([f'{k}="{v}"' for k, v in parent_attrs.items()])
-            xml_preview += f"<{parent_tag} {attrs_str}>\n"
-            for child in all_children:
-                child_str = ET.tostring(child, encoding="unicode").strip()
-                xml_preview += f"    {child_str}\n"
-            xml_preview += f"</{parent_tag}>"
-            
-            result_preview.setText(xml_preview)
+        try:
+            if len(selections) == 1:
+                # Replace: show the selected entry
+                entry = selections[0]["entry"]
+                xml_preview = f"<!-- {tr('mission_merge.conflict_state_replace', name=self._display_mod_name(entry.source_mod))} -->\n\n"
+                xml_preview += entry.to_xml_string()
+                result_preview.setText(xml_preview)
+            else:
+                # Merge: build combined result
+                xml_preview = f"<!-- {tr('mission_merge.conflict_state_merge', count=len(selections))} -->\n"
+                sources = ", ".join([self._display_mod_name(sel["entry"].source_mod) for sel in selections])
+                xml_preview += f"<!-- Sources: {sources} -->\n\n"
+                
+                # Get first entry as base
+                first_entry = selections[0]["entry"]
+                parent_tag = first_entry.element.tag
+                parent_attrs = dict(first_entry.element.attrib)
+                
+                # Collect all children with deduplication using XMLMergeHelper
+                all_children = []
+                seen_signatures = set()
+                
+                for sel in selections:
+                    entry = sel["entry"]
+                    if entry.element is None:
+                        continue
+                    for child in entry.element:
+                        try:
+                            sig = XMLMergeHelper.get_element_signature(child)
+                            if sig not in seen_signatures:
+                                cloned = ET.Element(child.tag, child.attrib)
+                                cloned.text = child.text
+                                cloned.tail = child.tail
+                                for subchild in child:
+                                    cloned.append(subchild)
+                                all_children.append(cloned)
+                                seen_signatures.add(sig)
+                        except Exception:
+                            # If signature fails, use string representation
+                            child_str = ET.tostring(child, encoding="unicode")
+                            if child_str not in seen_signatures:
+                                cloned = ET.Element(child.tag, child.attrib)
+                                cloned.text = child.text
+                                cloned.tail = child.tail
+                                for subchild in child:
+                                    cloned.append(subchild)
+                                all_children.append(cloned)
+                                seen_signatures.add(child_str)
+                
+                # Build merged XML
+                attrs_str = " ".join([f'{k}="{v}"' for k, v in parent_attrs.items()])
+                xml_preview += f"<{parent_tag} {attrs_str}>\n"
+                for child in all_children:
+                    child_str = ET.tostring(child, encoding="unicode").strip()
+                    xml_preview += f"    {child_str}\n"
+                xml_preview += f"</{parent_tag}>"
+                
+                result_preview.setText(xml_preview)
+        except Exception as e:
+            # If anything fails, show the first entry at least
+            if selections:
+                try:
+                    entry = selections[0]["entry"]
+                    xml_preview = f"<!-- Error: {str(e)} -->\n"
+                    xml_preview += entry.to_xml_string()
+                    result_preview.setText(xml_preview)
+                except Exception:
+                    result_preview.setText(f"<!-- Error building preview: {str(e)} -->")
 
     def _on_option_cell_clicked(self, tab_data: dict, row: int, col: int):
         """Allow selecting an option by clicking anywhere on its row."""
@@ -2830,15 +3323,21 @@ class _LegacyConflictResolverDialog(QDialog):
     
     def _update_entry_preview_from_tabdata(self, tab_data: dict, row: int):
         """Update preview when a row is selected."""
-        entries = tab_data.get("current_entries", [])
+        options_table = tab_data["options_table"]
         preview_text = tab_data["preview_text"]
         
-        if row < len(entries):
-            entry = entries[row]
-            xml_preview = f"<!-- {tr('mission_merge.source')}: {self._display_mod_name(entry.source_mod)} -->\n"
-            xml_preview += f"<!-- {tr('mission_merge.file')}: {entry.source_file.name} -->\n\n"
-            xml_preview += entry.to_xml_string()
-            preview_text.setText(xml_preview)
+        # Get entry from row data instead of using row index
+        row_data = options_table.get_row_data(row)
+        if not row_data:
+            return
+        entry = row_data.get("_entry")
+        if not entry:
+            return
+            
+        xml_preview = f"<!-- {tr('mission_merge.source')}: {self._display_mod_name(entry.source_mod)} -->\n"
+        xml_preview += f"<!-- {tr('mission_merge.file')}: {entry.source_file.name} -->\n\n"
+        xml_preview += entry.to_xml_string()
+        preview_text.setText(xml_preview)
     
     def get_resolved_conflicts(self) -> dict:
         """Get the resolved conflicts from all tabs."""
@@ -2880,26 +3379,59 @@ class _LegacyConflictResolverDialog(QDialog):
         return total, resolved
     
     def _update_status(self):
-        """Update status bar with conflict count."""
+        """Update status bar with detailed conflict count and progress information."""
         total_conflicts, resolved_count = self._compute_conflict_counts()
         unresolved = max(0, total_conflicts - resolved_count)
-        
+
         force = bool(getattr(self, "chk_force_apply", None) and self.chk_force_apply.isChecked())
 
+        # Calculate progress percentage
+        progress_pct = 0
+        if total_conflicts > 0:
+            progress_pct = int((resolved_count / total_conflicts) * 100)
+
         if unresolved > 0:
-            self.status_bar.setText(
-                f"⚠️ {tr('mission_merge.unresolved_conflicts', count=unresolved)}"
-            )
-            self.status_bar.setStyleSheet(
-                "color: #ff5252; font-weight: bold; padding: 8px; background-color: rgba(255, 82, 82, 0.1);"
-            )
+            status_text = f"⚠ {unresolved} {tr('mission_merge.unresolved_conflicts_text')} | {progress_pct}% {tr('mission_merge.completed')}"
+            if force:
+                status_text += f" | 🔓 {tr('mission_merge.force_mode_enabled')}"
+
+            self.status_bar.setText(status_text)
+            self.status_bar.setStyleSheet("""
+                QLabel {
+                    color: #ffffff;
+                    font-weight: bold;
+                    padding: 12px;
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #ff4444, stop:1 #cc0000);
+                    border: 2px solid #ff6666;
+                    border-radius: 6px;
+                    margin: 4px;
+                }
+            """)
             self.btn_apply.setEnabled(True if force else False)
         else:
-            self.status_bar.setText(
-                f"✅ {tr('mission_merge.all_conflicts_resolved')}"
-            )
-            self.status_bar.setStyleSheet("color: #4caf50; font-weight: bold; padding: 8px; background-color: rgba(76, 175, 80, 0.1);")
+            status_text = f"✓ {tr('mission_merge.all_conflicts_resolved')} | 100% {tr('mission_merge.completed')}"
+            self.status_bar.setText(status_text)
+            self.status_bar.setStyleSheet("""
+                QLabel {
+                    color: #ffffff;
+                    font-weight: bold;
+                    padding: 12px;
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #44aa44, stop:1 #008800);
+                    border: 2px solid #66cc66;
+                    border-radius: 6px;
+                    margin: 4px;
+                }
+            """)
             self.btn_apply.setEnabled(True)
+
+        # Update window title with progress
+        base_title = tr("mission_merge.conflict_resolver_title")
+        if total_conflicts > 0:
+            self.setWindowTitle(f"{base_title} ({resolved_count}/{total_conflicts})")
+        else:
+            self.setWindowTitle(base_title)
 
         # Keep per-tab remaining label in sync
         try:
@@ -3454,7 +3986,7 @@ class DuplicateFixerDialog(QDialog):
         left_layout.addWidget(dup_list)
         splitter.addWidget(left_widget)
         
-        # Right: options + result preview (aligned with the legacy conflict resolver)
+        # Right: options + result preview (aligned with ConflictResolverDialog)
         right_tabs = QTabWidget()
 
         # Tab 1: Resolution options

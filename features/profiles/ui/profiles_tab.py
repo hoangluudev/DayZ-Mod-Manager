@@ -75,6 +75,23 @@ class ProfileCard(CardWidget):
         path_layout.addWidget(self.lbl_path, stretch=1)
         
         self.card_layout.addLayout(path_layout)
+
+        # Installed mods count (quick scan: folders starting with '@')
+        mods_count = self._count_installed_mods(server_path)
+        mods_layout = QHBoxLayout()
+        mods_layout.setSpacing(4)
+
+        mods_icon = QLabel()
+        mods_icon.setPixmap(Icons.get_pixmap("puzzle", size=14))
+        mods_layout.addWidget(mods_icon)
+
+        count_text = "-" if mods_count is None else str(mods_count)
+        self.lbl_mods_count = QLabel(f"{tr('profiles.installed_mods')}: {count_text}")
+        self.lbl_mods_count.setStyleSheet("color: #aaa; font-size: 11px;")
+        mods_layout.addWidget(self.lbl_mods_count)
+        mods_layout.addStretch()
+
+        self.card_layout.addLayout(mods_layout)
         
         # Status
         self._add_status(server_path)
@@ -98,6 +115,15 @@ class ProfileCard(CardWidget):
             )
         
         self.card_layout.addWidget(status_widget)
+
+    def _count_installed_mods(self, server_path: str) -> int | None:
+        try:
+            path = Path(server_path)
+            if not path.exists() or not path.is_dir():
+                return None
+            return sum(1 for p in path.iterdir() if p.is_dir() and p.name.startswith("@"))
+        except Exception:
+            return None
 
 
 class ProfilesTab(BaseTab):

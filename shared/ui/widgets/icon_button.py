@@ -85,6 +85,9 @@ class IconButton(QPushButton):
             """)
             # ensure icon rendered at requested size
             self.setIconSize(QSize(size, size))
+
+        # Avoid drawing focus rectangle for small icon buttons used inside tables
+        self.setFocusPolicy(Qt.NoFocus)
         
         if object_name:
             self.setObjectName(object_name)

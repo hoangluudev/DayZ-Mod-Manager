@@ -1,34 +1,14 @@
-"""Reusable Table Component.
-
-This component intentionally contains only table-related concerns:
-- checkbox column
-- optional row index column
-- grouped rows + group header expand/collapse
-- sorting (ungrouped column sorting + grouped group-header sorting)
-- per-column rendering hooks ("templates")
-
-Domain-specific logic (mods, profiles, etc.) must live outside this module.
+"""
+Reusable Table Component with checkbox support, actions, and flexible fields.
+Based on QTableWidget from mods_tab.py.
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass
-from enum import Enum
-from typing import List, Dict, Any, Callable, Optional, Union
-
+from typing import List, Dict, Any, Callable, Optional
 from PySide6.QtWidgets import (
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QAbstractItemView,
-    QWidget,
-    QHBoxLayout,
-    QPushButton,
-    QCheckBox,
-    QToolTip,
-    QComboBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QWidget, QHBoxLayout, QPushButton, QCheckBox, QToolTip, QComboBox
 )
-from PySide6.QtCore import Qt, Signal, QSignalBlocker, QSize, QEvent
+from PySide6.QtCore import Qt, Signal, QItemSelectionModel, QSignalBlocker, QSize, QEvent
 from PySide6.QtGui import QColor
 
 from shared.ui.theme_manager import ThemeManager
@@ -36,23 +16,13 @@ from shared.ui.theme_manager import ThemeManager
 
 class TableColumn:
     """Represents a table column configuration."""
-    def __init__(
-        self,
-        key: str,
-        header: str,
-        width_mode: QHeaderView.ResizeMode = QHeaderView.ResizeToContents,
-        fixed_width: Optional[int] = None,
-        alignment: Qt.AlignmentFlag = Qt.AlignVCenter | Qt.AlignLeft,
-        renderer: Optional[Callable[[Dict[str, Any], int], Any]] = None,
-        sortable: bool = True,
-    ):
+    def __init__(self, key: str, header: str, width_mode: QHeaderView.ResizeMode = QHeaderView.ResizeToContents,
+                 fixed_width: Optional[int] = None, alignment: Qt.AlignmentFlag = Qt.AlignVCenter | Qt.AlignLeft):
         self.key = key
         self.header = header
         self.width_mode = width_mode
         self.fixed_width = fixed_width
         self.alignment = alignment
-        self.renderer = renderer
-        self.sortable = sortable
 
 
 class TableAction:
@@ -77,45 +47,6 @@ class TableGroup:
         self.background_color = background_color
 
 
-class _SortState(str, Enum):
-    NONE = "none"
-    ASC = "asc"
-    DESC = "desc"
-
-
-CellValue = Union[str, int, float, None, Dict[str, Any], QWidget]
-
-
-@dataclass(slots=True)
-class TableOptions:
-    """ReusableTable behavior + styling knobs.
-
-    External code should prefer these options over applying ad-hoc styles
-    to individual tables.
-    """
-
-    show_index: bool = False
-    index_header: str = "#"
-    index_start_at: int = 1
-
-    checkbox_column_width: int = 36
-    actions_column_width: int = 64
-    row_height: int = 36
-
-    hover_alpha_dark: float = 0.10
-    hover_alpha_light: float = 0.07
-
-    selection_behavior: QAbstractItemView.SelectionBehavior = QAbstractItemView.SelectRows
-    selection_mode: QAbstractItemView.SelectionMode = QAbstractItemView.MultiSelection
-
-    row_click_toggles_checkbox: bool = False
-    disable_selection_highlight_when_row_click_toggles_checkbox: bool = True
-
-    extra_stylesheet: str = ""
-
-    checkbox_factory: Optional[Callable[[int, Dict[str, Any]], QCheckBox]] = None
-
-
 class ReusableTable(QTableWidget):
     """
     Reusable table component with:
@@ -133,45 +64,23 @@ class ReusableTable(QTableWidget):
     group_toggled = Signal(str, bool)  # Group title, expanded state
     row_double_clicked = Signal(int)  # Row index
 
-    def __init__(
-        self,
-        columns: List[TableColumn],
-        actions: Optional[List[TableAction]] = None,
-        has_checkbox: bool = True,
-        selection_mode: QAbstractItemView.SelectionBehavior = QAbstractItemView.SelectRows,
-        parent=None,
-        *,
-        options: Optional[TableOptions] = None,
-    ):
+    def __init__(self, columns: List[TableColumn], actions: Optional[List[TableAction]] = None,
+                 has_checkbox: bool = True, selection_mode: QAbstractItemView.SelectionMode = QAbstractItemView.SelectRows,
+                 parent=None):
         super().__init__(parent)
 
         self.columns = columns
         self.actions = actions or []
         self.has_checkbox = has_checkbox
-        # Backward-compat: historically this arg was used as SelectionBehavior.
-        self._selection_behavior = selection_mode
-        self.options = options or TableOptions()
+        self.selection_mode = selection_mode
         self._data = []  # Store row data
         self._groups = []  # Store groups
         self._syncing_selection = False
         self._actions_col = None
         self._row_click_toggles_checkbox = False
 
-        # Sorting state (custom: we disable Qt's built-in sorting to support group rows).
-        self._base_headers: List[str] = []
-        self._sort_column: Optional[int] = None  # QTableWidget column index (includes checkbox offset)
-        self._sort_state: _SortState = _SortState.NONE
-        self._original_data: List[Dict[str, Any]] = []
-        self._original_groups: List[TableGroup] = []
-
         self._setup_table()
         self._connect_signals()
-
-        if self.options.row_click_toggles_checkbox:
-            self.set_row_click_toggles_checkbox(
-                True,
-                disable_selection_highlight=self.options.disable_selection_highlight_when_row_click_toggles_checkbox,
-            )
 
     def set_row_click_toggles_checkbox(self, enabled: bool, *, disable_selection_highlight: bool = True):
         """When enabled, left-clicking a row toggles the checkbox.
@@ -190,49 +99,29 @@ class ReusableTable(QTableWidget):
             elif self.has_checkbox:
                 self.setSelectionMode(QAbstractItemView.MultiSelection)
 
-    def _has_index(self) -> bool:
-        return bool(self.options and self.options.show_index)
-
-    def _first_data_col(self) -> int:
-        return (1 if self.has_checkbox else 0) + (1 if self._has_index() else 0)
-
-    def _is_sortable_section(self, section: int) -> bool:
-        if self.has_checkbox and section == 0:
-            return False
-        if self._has_index() and section == (1 if self.has_checkbox else 0):
-            return False
-        if self._actions_col is not None and section == self._actions_col:
-            return False
-
-        first_data_col = self._first_data_col()
-        last_data_col = self.columnCount() - (1 if self.actions else 0) - 1
-        return first_data_col <= section <= last_data_col
-
     def _setup_table(self):
         """Setup table structure and appearance."""
         # Calculate column count
         col_count = len(self.columns)
         if self.has_checkbox:
             col_count += 1
-        if self._has_index():
-            col_count += 1
         if self.actions:
             col_count += 1
 
         self.setColumnCount(col_count)
-        # Selection defaults live in options; callers shouldn't have to restyle tables.
-        self.setSelectionBehavior(self._selection_behavior)
-        self.setSelectionMode(self.options.selection_mode)
+        # NOTE: selection_mode here is historically used as SelectionBehavior (e.g. SelectRows)
+        self.setSelectionBehavior(self.selection_mode)
+        # Allow multiple selected rows; we also override click behavior below to avoid Ctrl.
+        self.setSelectionMode(QAbstractItemView.MultiSelection)
         self.setAlternatingRowColors(True)
-        # Disable Qt sorting; group headers + spans don't work reliably with built-in sorting.
-        self.setSortingEnabled(False)
+        self.setSortingEnabled(True)  # Enable column sorting
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)  # Prevent editing
 
         # Subtle row hover highlight (without requiring selection).
         try:
             accent = QColor(ThemeManager.get_accent_color())
             # Slightly stronger in dark themes.
-            alpha = self.options.hover_alpha_dark if ThemeManager.is_dark_theme() else self.options.hover_alpha_light
+            alpha = 0.10 if ThemeManager.is_dark_theme() else 0.07
             accent.setAlphaF(alpha)
             hover_rgba = f"rgba({accent.red()}, {accent.green()}, {accent.blue()}, {accent.alphaF()})"
             self.setStyleSheet(
@@ -241,12 +130,6 @@ class ReusableTable(QTableWidget):
             )
         except Exception:
             pass
-
-        if self.options.extra_stylesheet:
-            try:
-                self.setStyleSheet((self.styleSheet() or "") + "\n" + self.options.extra_stylesheet)
-            except Exception:
-                pass
 
         # Important: ensure hover events are delivered so tooltips work.
         # (cellEntered requires mouse tracking; tooltip events are also more reliable with it.)
@@ -263,33 +146,18 @@ class ReusableTable(QTableWidget):
         headers = []
         if self.has_checkbox:
             headers.append("")  # Checkbox column
-        if self._has_index():
-            headers.append(self.options.index_header)
         headers.extend([col.header for col in self.columns])
         if self.actions:
             headers.append("")  # Actions column
 
-        self._base_headers = list(headers)
         self.setHorizontalHeaderLabels(headers)
-        try:
-            self.horizontalHeader().setSortIndicatorShown(False)
-        except Exception:
-            pass
 
         # Configure header resize modes
         header = self.horizontalHeader()
         col_idx = 0
 
         if self.has_checkbox:
-            header.setSectionResizeMode(col_idx, QHeaderView.Fixed)
-            # Use 36px to match other dialogs (enough space for checkbox + padding)
-            self.setColumnWidth(col_idx, int(self.options.checkbox_column_width))
-            col_idx += 1
-
-        if self._has_index():
-            header.setSectionResizeMode(col_idx, QHeaderView.Fixed)
-            # Keep index compact; content is small and centered.
-            self.setColumnWidth(col_idx, 48)
+            header.setSectionResizeMode(col_idx, QHeaderView.ResizeToContents)
             col_idx += 1
 
         for col in self.columns:
@@ -302,17 +170,11 @@ class ReusableTable(QTableWidget):
 
         if self.actions:
             header.setSectionResizeMode(col_idx, QHeaderView.Fixed)
-            self.setColumnWidth(col_idx, int(self.options.actions_column_width))  # Fixed width for actions
+            self.setColumnWidth(col_idx, 64)  # Fixed width for actions
 
-        # Prefer stable header behavior like conflict resolver dialog
-        try:
-            header.setStretchLastSection(True)
-            header.setHighlightSections(False)
-        except Exception:
-            pass
         # Set row height
         try:
-            self.verticalHeader().setDefaultSectionSize(int(self.options.row_height))
+            self.verticalHeader().setDefaultSectionSize(36)
         except Exception:
             pass
 
@@ -321,170 +183,9 @@ class ReusableTable(QTableWidget):
         self.itemSelectionChanged.connect(self._on_selection_changed)
         self.itemChanged.connect(self._on_item_changed)
         try:
-            self.horizontalHeader().sectionClicked.connect(self._on_header_section_clicked)
-        except Exception:
-            pass
-        try:
             self.cellDoubleClicked.connect(lambda r, _c: self.row_double_clicked.emit(r))
         except Exception:
             pass
-
-    def _is_grouped(self) -> bool:
-        return bool(self._groups)
-
-    def _on_header_section_clicked(self, section: int):
-        """Handle clicks on the horizontal header to apply 3-state sorting.
-
-        For grouped tables, we sort by group title (not by columns). We trigger that from the
-        first data column header to avoid conflicts with group expand/collapse clicks.
-        """
-        if not self._data:
-            return
-
-        if not self._is_sortable_section(section):
-            return
-
-        if self._sort_column == section:
-            self._sort_state = {
-                _SortState.NONE: _SortState.ASC,
-                _SortState.ASC: _SortState.DESC,
-                _SortState.DESC: _SortState.NONE,
-            }[self._sort_state]
-        else:
-            self._sort_column = section
-            self._sort_state = _SortState.ASC
-
-        if self._is_grouped():
-            self._apply_group_sorting()
-        else:
-            self._apply_sorting()
-        self._update_header_sort_icons()
-
-    def _update_header_sort_icons(self):
-        """Update header labels to show NONE/ASC/DESC state."""
-        if not self._base_headers:
-            return
-
-        headers = list(self._base_headers)
-
-        first_data_col = self._first_data_col()
-        num_data_cols = len(self.columns)
-
-        for i in range(num_data_cols):
-            col = self.columns[i]
-            col_idx = first_data_col + i
-            if not getattr(col, "sortable", True):
-                continue
-
-            if col_idx == self._sort_column:
-                if self._sort_state == _SortState.ASC:
-                    icon = " ↑"
-                elif self._sort_state == _SortState.DESC:
-                    icon = " ↓"
-                else:  # NONE
-                    icon = " ⇵"
-            else:
-                icon = " ⇵"
-            try:
-                headers[col_idx] = f"{headers[col_idx]}{icon}"
-            except Exception:
-                pass
-
-        try:
-            self.setHorizontalHeaderLabels(headers)
-            self.horizontalHeader().setSortIndicatorShown(False)
-        except Exception:
-            pass
-
-    def _sort_key_for_value(self, value: Any):
-        if isinstance(value, dict):
-            if value.get("widget_type"):
-                # Prefer stable sort value for widget cells (e.g., combo current_data).
-                value = value.get("current_data")
-            else:
-                value = value.get("text")
-
-        if value is None:
-            return (1, "")
-
-        # Special handling for file sizes
-        if isinstance(value, str):
-            try:
-                from shared.utils.mod_utils import parse_file_size
-                parsed_size = parse_file_size(value)
-                if parsed_size > 0:
-                    return (0, parsed_size)
-            except Exception:
-                pass
-
-        if isinstance(value, (int, float)):
-            return (0, value)
-
-        try:
-            return (0, str(value).casefold())
-        except Exception:
-            return (0, str(value))
-
-    def _apply_sorting(self):
-        if self._is_grouped():
-            return
-        if not self._data:
-            return
-
-        if not self._original_data:
-            # Preserve insertion order for the NONE state.
-            self._original_data = list(self._data)
-
-        if self._sort_state == _SortState.NONE or self._sort_column is None:
-            self._data = list(self._original_data)
-            self._render_data()
-            return
-
-        first_data_col = self._first_data_col()
-        col_idx = self._sort_column - first_data_col
-        if not (0 <= col_idx < len(self.columns)):
-            return
-
-        col_key = self.columns[col_idx].key
-
-        # Assign a stable original index for deterministic sorting.
-        for i, row in enumerate(self._original_data):
-            row.setdefault("_original_index", i)
-
-        reverse = (self._sort_state == _SortState.DESC)
-        self._data = sorted(
-            list(self._data),
-            key=lambda r: (self._sort_key_for_value(r.get(col_key)), r.get("_original_index", 0)),
-            reverse=reverse,
-        )
-        self._render_data()
-
-    def _apply_group_sorting(self):
-        """Sort groups by their display title.
-
-        Grouped tables cannot safely use QTableWidget's built-in sorting.
-        We sort the group list, then rebuild the flattened data.
-        """
-        if not self._is_grouped():
-            return
-        if not self._groups:
-            return
-
-        if not self._original_groups:
-            self._original_groups = list(self._groups)
-
-        if self._sort_state == _SortState.NONE:
-            self._groups = list(self._original_groups)
-            self._rebuild_grouped_data()
-            return
-
-        reverse = (self._sort_state == _SortState.DESC)
-        self._groups = sorted(
-            list(self._groups),
-            key=lambda g: self._sort_key_for_value(getattr(g, "display_name", "")),
-            reverse=reverse,
-        )
-        self._rebuild_grouped_data()
 
     def mousePressEvent(self, event):
         if (
@@ -505,9 +206,8 @@ class ReusableTable(QTableWidget):
                 # Check if this is a group header
                 row_data = self._data[row] if 0 <= row < len(self._data) else None
                 if row_data and row_data.get("_is_group_header"):
-                    # Avoid interfering with an actual checkbox widget in column 0.
-                    checkbox_widget = self.cellWidget(row, 0) if self.has_checkbox else None
-                    if not (self.has_checkbox and col == 0 and isinstance(checkbox_widget, QCheckBox)):
+                    # Only toggle if not clicking on checkbox column
+                    if (not self.has_checkbox or col > 0):
                         group_title = row_data.get("_group_title")
                         if group_title:
                             self.toggle_group(group_title)
@@ -561,28 +261,43 @@ class ReusableTable(QTableWidget):
 
                         # Prefer a user-provided tooltip for the hovered column (e.g. name_tooltip)
                         # but fall back to a generic row tooltip.
-                        column_tooltip = None
-                        if 0 <= col < self.columnCount():
-                            data_col_idx = col - self._first_data_col()
-                            if 0 <= data_col_idx < len(self.columns):
-                                col_key = self.columns[data_col_idx].key
-                                tooltip_key = f"{col_key}_tooltip"
-                                if tooltip_key in row_data:
-                                    column_tooltip = row_data[tooltip_key]
-                        
-                        if column_tooltip:
-                            QToolTip.showText(global_pos, column_tooltip, self.viewport())
+                        for key, value in row_data.items():
+                            if key.startswith("_") or key in (
+                                "checked",
+                                "status_color",
+                                "status_icon",
+                                "bikey_color",
+                                "bikey_icon",
+                                "workshop_id",
+                                "install_date",
+                                "has_update",
+                            ):
+                                continue
+
+                            # Avoid showing raw dict/widget descriptors (previously looked like JSON).
+                            if isinstance(value, dict):
+                                if value.get("widget_type"):
+                                    continue
+                                value = value.get("text", "")
+                                if value in (None, ""):
+                                    continue
+
+                            # Avoid noisy non-scalar values.
+                            if isinstance(value, (list, tuple, set)):
+                                continue
+                            if isinstance(value, dict):
+                                continue
+                            display_key = key.replace("_", " ").title()
+                            tooltip_parts.append(f"{display_key}: {value}")
+
+                        # Always show the underlying folder name when it differs from display name.
+                        if folder_value and name_value and str(folder_value) != str(name_value):
+                            tooltip_parts.insert(0, f"Folder: {folder_value}")
+
+                        tooltip_text = "\n".join(tooltip_parts) if tooltip_parts else ""
+                        if tooltip_text:
+                            QToolTip.showText(global_pos, tooltip_text, self.viewport())
                             return True
-                        
-                        # Show only the current column's value, not all fields
-                        if 0 <= data_col_idx < len(self.columns):
-                            col_def = self.columns[data_col_idx]
-                            col_value = row_data.get(col_def.key)
-                            if col_value is not None:
-                                display_key = col_def.key.replace("_", " ").title()
-                                tooltip_text = f"{display_key}: {col_value}"
-                                QToolTip.showText(global_pos, tooltip_text, self.viewport())
-                                return True
 
             QToolTip.hideText()
             event.ignore()
@@ -614,12 +329,6 @@ class ReusableTable(QTableWidget):
                 checked = (item.checkState() == Qt.Checked)
             except Exception:
                 return
-            # Keep backing data in sync.
-            try:
-                if 0 <= item.row() < len(self._data) and not self._data[item.row()].get("_is_group_header"):
-                    self._data[item.row()]["checked"] = checked
-            except Exception:
-                pass
             self.checkbox_toggled.emit(item.row(), checked)
 
     def _checkbox_changed(self, row_idx: int, state: int):
@@ -628,70 +337,72 @@ class ReusableTable(QTableWidget):
         Emits `checkbox_toggled` signal. Checkbox is the source of truth for selection.
         """
         checked = (state == Qt.Checked)
-        # Keep backing data in sync so re-renders/sorts preserve state.
-        try:
-            if 0 <= row_idx < len(self._data) and not self._data[row_idx].get("_is_group_header"):
-                self._data[row_idx]["checked"] = checked
-        except Exception:
-            pass
         self.checkbox_toggled.emit(row_idx, checked)
 
-    # NOTE: Tooltips are handled in viewportEvent(). We intentionally do not use cellEntered.
+    def _on_cell_entered(self, row: int, col: int):
+        """Handle cell enter to display tooltip with row data."""
+        # Check if the cell item has its own tooltip
+        item = self.item(row, col)
+        if item and item.toolTip():
+            # If item has tooltip, show it using QToolTip
+            rect = self.visualItemRect(item)
+            global_pos = self.mapToGlobal(rect.topLeft())
+            QToolTip.showText(global_pos, item.toolTip(), self)
+            return
+        
+        # Only show row data tooltip if we have data
+        if not self._data:
+            QToolTip.hideText()
+            return
+        
+        row_data = self.get_row_data(row)
+        if not row_data:
+            QToolTip.hideText()
+            return
+        
+        # Build tooltip text from row data
+        tooltip_parts = []
+        for key, value in row_data.items():
+            # Skip internal/hidden keys
+            if key.startswith("_") or key in ("checked", "status_color", "status_icon", "workshop_id", "install_date", "has_update"):
+                continue
+            if isinstance(value, dict):
+                value = value.get("text", "")
+            # Format key nicely
+            display_key = key.replace("_", " ").title()
+            tooltip_parts.append(f"{display_key}: {value}")
+
+        name_value = row_data.get("name")
+        folder_value = row_data.get("mod_folder")
+        if folder_value and name_value and str(folder_value) != str(name_value):
+            tooltip_parts.insert(0, f"Folder: {folder_value}")
+        
+        tooltip_text = "\n".join(tooltip_parts) if tooltip_parts else ""
+        if tooltip_text:
+            rect = self.visualItemRect(self.item(row, col) or self.item(row, 0))
+            if rect:
+                global_pos = self.mapToGlobal(rect.topLeft())
+                QToolTip.showText(global_pos, tooltip_text, self)
+        else:
+            QToolTip.hideText()
+
+        self._data = []  # Store row data
+        self._groups = []  # Store groups
+        self._syncing_selection = False
+        self._actions_col = None
+        self._row_click_toggles_checkbox = False
+
+        self._setup_table()
+        self._connect_signals()
 
     def set_data_with_groups(self, groups: List[TableGroup]):
         """Set table data organized in groups."""
         self._groups = groups
-        self._original_groups = list(groups)
         self._data = []
-        self._sort_column = None
-        self._sort_state = _SortState.NONE
-        self._original_data = []
-        self._rebuild_grouped_data()
-
-    def set_data(self, data: List[Dict[str, Any]]):
-        """Set table data without groups."""
-        self._groups = []
-        self._original_groups = []
-        self._data = data
-        self._original_data = list(data)
-        self._sort_column = None
-        self._sort_state = _SortState.NONE
-        self._update_header_sort_icons()
-        self._render_data()
-
-    # Convenience helpers so callers can set widths/modes by column key (avoids hard-coded indexes)
-    def _column_index_for_key(self, key: str) -> Optional[int]:
-        for i, col in enumerate(self.columns):
-            if col.key == key:
-                idx = i
-                idx += self._first_data_col()
-                return idx
-        return None
-
-    def set_column_width_by_key(self, key: str, width: int):
-        idx = self._column_index_for_key(key)
-        if idx is not None:
-            try:
-                self.setColumnWidth(idx, int(width))
-            except Exception:
-                pass
-
-    def set_section_resize_mode_by_key(self, key: str, mode: QHeaderView.ResizeMode):
-        idx = self._column_index_for_key(key)
-        if idx is not None:
-            try:
-                self.horizontalHeader().setSectionResizeMode(idx, mode)
-            except Exception:
-                pass
-
-    def _rebuild_grouped_data(self):
-        if not self._groups:
-            return
-
-        self._data = []
-
+        
         # Flatten groups into rows, inserting group headers
-        for group in self._groups:
+        for group in groups:
+            # Add group header row
             group_header = {
                 "_is_group_header": True,
                 "_group_title": group.display_name,
@@ -700,23 +411,26 @@ class ReusableTable(QTableWidget):
                 "_group_expandable": True,
                 "_group_background": group.background_color,
             }
+            # Add empty values for all columns
             for col in self.columns:
                 group_header[col.key] = ""
             self._data.append(group_header)
-
+            
+            # Add group rows if expanded
             if group.expanded:
                 self._data.extend(group.rows)
-
-        self._update_header_sort_icons()
+        
         self._render_data()
 
-    # Group sorting intentionally disabled: grouped tables rely on stable group order.
+    def set_data(self, data: List[Dict[str, Any]]):
+        """Set table data without groups."""
+        self._groups = []
+        self._data = data
+        self._render_data()
 
     def _render_data(self):
         """Render the current data to the table."""
         self.setRowCount(len(self._data))
-
-        visible_index = int(self.options.index_start_at)
 
         for row_idx, row_data in enumerate(self._data):
             col_idx = 0
@@ -724,70 +438,28 @@ class ReusableTable(QTableWidget):
             # Checkbox column
             if self.has_checkbox:
                 if not row_data.get("_is_group_header"):
-                    if self.options.checkbox_factory:
-                        checkbox = self.options.checkbox_factory(row_idx, row_data)
-                    else:
-                        checkbox = QCheckBox()
+                    checkbox = QCheckBox()
                     checkbox.setChecked(row_data.get('checked', False))
                     # Connect state change to handler with row index captured
                     checkbox.stateChanged.connect(lambda state, r=row_idx: self._checkbox_changed(r, state))
                     self.setCellWidget(row_idx, col_idx, checkbox)
                 col_idx += 1
 
-            # Index column
-            if self._has_index():
-                idx_item = QTableWidgetItem("")
-                idx_item.setTextAlignment(Qt.AlignCenter)
-                if not row_data.get("_is_group_header"):
-                    idx_item.setText(str(visible_index))
-                    visible_index += 1
-                self.setItem(row_idx, col_idx, idx_item)
-                col_idx += 1
-
             # Data columns
             for col in self.columns:
-                try:
-                    value: CellValue
-                    if callable(getattr(col, "renderer", None)):
-                        value = col.renderer(row_data, row_idx)
-                    else:
-                        value = row_data.get(col.key, "")
-                except Exception:
-                    value = row_data.get(col.key, "")
+                value = row_data.get(col.key, "")
 
                 # Special handling for group headers
                 if row_data.get("_is_group_header"):
-                    # Use a clickable widget for group headers to reliably capture clicks
-                    title = str(row_data.get("_group_title", ""))
-                    collapsed = bool(row_data.get("_group_collapsed", False))
-                    icon_text = "▶" if collapsed else "▼"
-
-                    # Theme-aware colors
-                    try:
-                        if row_data.get("_group_background"):
-                            bg = row_data.get("_group_background")
-                        else:
-                            bg = "#2d2d2d" if ThemeManager.is_dark_theme() else "#d0d0d0"
-                        fg = "#ffffff" if ThemeManager.is_dark_theme() else "#333333"
-                    except Exception:
-                        bg = "#d0d0d0"
-                        fg = "#333333"
-
-                    btn = QPushButton(f"{icon_text} {title}")
-                    btn.setFlat(True)
-                    btn.setCursor(Qt.PointingHandCursor)
-                    btn.setFocusPolicy(Qt.NoFocus)
-                    btn.setStyleSheet(
-                        f"QPushButton{{text-align:left; padding:8px; background:{bg}; color:{fg}; border:none; font-weight:bold}}"
-                    )
-                    # Connect click to toggle the group by title
-                    try:
-                        btn.clicked.connect(lambda _checked=False, t=title: self.toggle_group(t))
-                    except Exception:
-                        pass
-
-                    span_start_col = 0
-                    self.setCellWidget(row_idx, span_start_col, btn)
+                    item = QTableWidgetItem(row_data.get("_group_title", ""))
+                    item.setTextAlignment(col.alignment)
+                    item.setBackground(QColor(row_data.get("_group_background", "#e0e0e0")))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    # For group headers, start from column 0 to span across checkbox column too
+                    span_start_col = 0 if self.has_checkbox else col_idx
+                    self.setItem(row_idx, span_start_col, item)
                     # Span across all columns
                     self.setSpan(row_idx, span_start_col, 1, self.columnCount() - span_start_col)
                     break
@@ -992,56 +664,19 @@ class ReusableTable(QTableWidget):
 
     def toggle_group(self, group_title: str):
         """Toggle a group's collapsed/expanded state."""
-        if not self._groups:
-            return
-
-        # Try exact match first, then fallback to partial/suffix match (handles prefixed icons)
-        matched = None
         for group in self._groups:
-            try:
-                if group.display_name == group_title or group.name == group_title:
-                    matched = group
-                    break
-            except Exception:
-                continue
-
-        if matched is None:
-            # Strip common icon glyphs/prefixes and try suffix match
-            stripped = str(group_title).lstrip("▶▼ ")
-            for group in self._groups:
-                try:
-                    if str(group.display_name).endswith(stripped) or str(group.name).endswith(stripped):
-                        matched = group
-                        break
-                except Exception:
-                    continue
-
-        if not matched:
-            return
-
-        # Toggle and rebuild grouped rows in-place (avoid resetting other table state)
-        try:
-            matched.expanded = not bool(matched.expanded)
-            # Rebuild flattened data and re-render
-            self._rebuild_grouped_data()
-        except Exception:
-            try:
-                # Fallback to full reset
+            if group.display_name == group_title:
+                group.expanded = not group.expanded
                 self.set_data_with_groups(self._groups)
-            except Exception:
-                pass
-
-        try:
-            self.group_toggled.emit(matched.display_name, bool(matched.expanded))
-        except Exception:
-            pass
+                self.group_toggled.emit(group_title, group.expanded)
+                break
 
     def _create_widget_for_data(self, data: Dict[str, Any], row_idx: int, row_data: Dict[str, Any]) -> Optional[QWidget]:
         """Create a widget based on data configuration."""
         widget_type = data.get("widget_type")
         
         if widget_type == "combo":
-            combo = _AutoWidthComboBox()
+            combo = QComboBox()
             combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
             combo.setMinimumHeight(32)  # Ensure sufficient height for text display
             
@@ -1115,45 +750,6 @@ class ReusableTable(QTableWidget):
             layout.addWidget(btn)
         return widget
 
-    def update_headers(
-        self,
-        *,
-        checkbox_header: Optional[str] = None,
-        index_header: Optional[str] = None,
-        columns: Optional[Dict[str, str]] = None,
-        actions_header: Optional[str] = None,
-    ):
-        """Update displayed header texts without changing table structure.
-
-        This is intended for language switching.
-        """
-        if checkbox_header is not None and self.has_checkbox:
-            # checkbox column is always "" today, but keep for future.
-            pass
-        if index_header is not None and self._has_index():
-            self.options.index_header = str(index_header)
-
-        if columns:
-            for col in self.columns:
-                if col.key in columns:
-                    col.header = str(columns[col.key])
-
-        if actions_header is not None and self.actions:
-            # actions header is always "" in this component today; keep hook.
-            pass
-
-        headers: List[str] = []
-        if self.has_checkbox:
-            headers.append("")
-        if self._has_index():
-            headers.append(self.options.index_header)
-        headers.extend([c.header for c in self.columns])
-        if self.actions:
-            headers.append("")
-
-        self._base_headers = list(headers)
-        self._update_header_sort_icons()
-
     def get_selected_rows(self) -> List[int]:
         """Get list of selected row indices."""
         selected_rows = set()
@@ -1196,16 +792,3 @@ class ReusableTable(QTableWidget):
     def clear_data(self):
         """Clear all table data."""
         self.setRowCount(0)
-
-
-class _AutoWidthComboBox(QComboBox):
-    """ComboBox that ensures the popup is wide enough for its contents."""
-
-    def showPopup(self):
-        try:
-            view = self.view()
-            if view is not None:
-                view.setMinimumWidth(max(self.minimumSizeHint().width(), self.sizeHint().width()))
-        except Exception:
-            pass
-        return super().showPopup()

@@ -14,7 +14,6 @@ from PySide6.QtGui import QDesktopServices
 from shared.utils.locale_manager import LocaleManager, tr
 from features.settings.core.settings_manager import SettingsManager
 from shared.core.app_config import AppConfigManager
-from shared.core.default_restore import restore_server_defaults
 from shared.ui.widgets import SectionBox, PathSelector, IconButton
 from shared.ui.icons import Icons
 from shared.ui.theme_manager import ThemeManager
@@ -402,29 +401,6 @@ class ConfigTab(BaseSubTab):
         self.storage_box.add_layout(storage_layout)
         self.add_widget(self.storage_box)
         
-        # Restore Defaults Section
-        self.restore_box = SectionBox(tr("settings.restore_section"))
-        restore_layout = QVBoxLayout()
-        restore_layout.setSpacing(12)
-        
-        self.lbl_restore_desc = QLabel(tr("settings.restore_desc"))
-        self.lbl_restore_desc.setWordWrap(True)
-        restore_layout.addWidget(self.lbl_restore_desc)
-        
-        btn_layout = QHBoxLayout()
-        self.btn_restore = IconButton(
-            icon_name="restore",
-            text=tr("settings.restore_defaults"),
-            size=16
-        )
-        self.btn_restore.clicked.connect(self._restore_defaults)
-        btn_layout.addWidget(self.btn_restore)
-        btn_layout.addStretch()
-        restore_layout.addLayout(btn_layout)
-        
-        self.restore_box.add_layout(restore_layout)
-        self.add_widget(self.restore_box)
-        
         self.add_stretch()
 
     def _open_configs_folder(self, path: Path | None):
@@ -477,39 +453,13 @@ class ConfigTab(BaseSubTab):
         self.settings.settings.profiles_storage_path = path
         self.settings.save()
     
-    def _restore_defaults(self):
-        """Restore server default files."""
-        reply = QMessageBox.question(
-            self,
-            tr("settings.confirm_restore"),
-            tr("settings.restore_warning"),
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            success = restore_server_defaults()
-            if success:
-                QMessageBox.information(
-                    self,
-                    tr("common.success"),
-                    tr("settings.restore_success")
-                )
-            else:
-                QMessageBox.warning(
-                    self,
-                    tr("common.error"),
-                    tr("settings.restore_failed")
-                )
-    
     def update_texts(self):
         """Update UI texts."""
         if hasattr(self, 'files_box'):
             self.files_box.setTitle(tr("settings.config_files"))
         self.paths_box.setTitle(tr("settings.default_paths"))
         self.storage_box.setTitle(tr("settings.data_storage"))
-        self.restore_box.setTitle(tr("settings.restore_section"))
         self.lbl_storage_note.setText(tr("settings.storage_note"))
-        self.lbl_restore_desc.setText(tr("settings.restore_desc"))
         self.chk_custom_storage.setText(tr("settings.use_custom_storage"))
 
 

@@ -4,9 +4,21 @@ Refactored to use base classes and utilities.
 """
 
 from pathlib import Path
-from shared.ui.components.table import ReusableTable, TableColumn
-from PySide6.QtCore import Qt, Signal
+from shared.ui.components.table import ReusableTable
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QLabel, QWidget, QVBoxLayout, QSplitter, QGroupBox,
+    QLineEdit, QHBoxLayout, QPushButton, QCheckBox, QHeaderView,
+    QAbstractItemView, QMessageBox, QTableWidgetItem, QSizePolicy, QProgressDialog
+)
+
+from features.mods.ui.mods_tables import (
+    create_installed_table,
+    create_workshop_table,
+    update_installed_table_headers,
+    update_workshop_table_headers,
+)
 
 from features.mods.core.mod_integrity import ModIntegrityChecker
 from features.profiles.core.profile_manager import ProfileManager
@@ -24,7 +36,6 @@ from shared.utils.mod_utils import (
     scan_workshop_mods, scan_installed_mods, get_mod_version,
     get_folder_size, format_datetime
 )
-from features.settings.core.settings_manager import SettingsManager
 
 
 # Column constants
@@ -112,26 +123,43 @@ class ModsTab(BaseTab):
         
         # Actions
         actions = QHBoxLayout()
-        self.btn_add_selected = IconButton("plus", text=tr("mods.add_to_server"), size=18, object_name="primary")
+        self.btn_add_selected = IconButton(
+            "plus",
+            text="",
+            size=18,
+            icon_only=True,
+            object_name="primary",
+        )
+        self.btn_add_selected.setToolTip(
+            f"<b>{tr('mods.add_to_server')}</b><br>{tr('mods.add_to_server_tooltip')}"
+        )
         self.btn_add_selected.clicked.connect(self._add_selected_mods)
         actions.addWidget(self.btn_add_selected)
         
-        self.btn_select_all_ws = QPushButton(tr("common.select_all"))
+        self.btn_select_all_ws = IconButton("check", text="", size=18, icon_only=True)
+        self.btn_select_all_ws.setToolTip(
+            f"<b>{tr('common.select_all')}</b><br>{tr('common.select_all_tooltip')}"
+        )
         self.btn_select_all_ws.clicked.connect(self._select_all_workshop)
         actions.addWidget(self.btn_select_all_ws)
         
-        self.btn_deselect_all_ws = QPushButton(tr("common.deselect_all"))
+        self.btn_deselect_all_ws = IconButton("close", text="", size=18, icon_only=True)
+        self.btn_deselect_all_ws.setToolTip(
+            f"<b>{tr('common.deselect_all')}</b><br>{tr('common.deselect_all_tooltip')}"
+        )
         self.btn_deselect_all_ws.clicked.connect(self._deselect_all_workshop)
         actions.addWidget(self.btn_deselect_all_ws)
         
         actions.addStretch()
         
-        # Optimize mod names checkbox
-        from PySide6.QtWidgets import QCheckBox
-        self.chk_optimize_names = QCheckBox(tr("mods.optimize_names"))
-        self.chk_optimize_names.setToolTip(tr("mods.optimize_names_tooltip"))
-        self.chk_optimize_names.setChecked(False)
-        actions.addWidget(self.chk_optimize_names)
+        # Optimize mod names toggle (icon-only)
+        self.btn_optimize_names = IconButton("sort", text="", size=18, icon_only=True)
+        self.btn_optimize_names.setCheckable(True)
+        self.btn_optimize_names.setChecked(False)
+        self.btn_optimize_names.setToolTip(
+            f"<b>{tr('mods.optimize_names')}</b><br>{tr('mods.optimize_names_tooltip')}"
+        )
+        actions.addWidget(self.btn_optimize_names)
         
         actions.addWidget(QLabel("|"))
         
@@ -171,25 +199,45 @@ class ModsTab(BaseTab):
         
         # Actions
         actions = QHBoxLayout()
-        self.btn_remove_selected = IconButton("trash", text=tr("mods.remove_from_server"), size=18, object_name="danger")
+        self.btn_remove_selected = IconButton(
+            "trash",
+            text="",
+            size=18,
+            icon_only=True,
+            object_name="danger",
+        )
+        self.btn_remove_selected.setToolTip(
+            f"<b>{tr('mods.remove_from_server')}</b><br>{tr('mods.remove_from_server_tooltip')}"
+        )
         self.btn_remove_selected.clicked.connect(self._remove_selected_mods)
         actions.addWidget(self.btn_remove_selected)
         
-        self.btn_copy_all_bikeys = IconButton("key", text=tr("mods.copy_all_bikeys"), size=18)
+        self.btn_copy_all_bikeys = IconButton("key", text="", size=18, icon_only=True)
+        self.btn_copy_all_bikeys.setToolTip(
+            f"<b>{tr('mods.copy_all_bikeys')}</b><br>{tr('mods.copy_all_bikeys_tooltip')}"
+        )
         self.btn_copy_all_bikeys.clicked.connect(self._copy_all_bikeys)
         self.btn_copy_all_bikeys.setEnabled(False)  # Enable when mods without bikeys exist
         actions.addWidget(self.btn_copy_all_bikeys)
 
-        self.btn_optimize_installed = IconButton("sort", text=tr("mods.optimize_installed"), size=18)
-        self.btn_optimize_installed.setToolTip(tr("mods.optimize_installed_tooltip"))
+        self.btn_optimize_installed = IconButton("sort", text="", size=18, icon_only=True)
+        self.btn_optimize_installed.setToolTip(
+            f"<b>{tr('mods.optimize_installed')}</b><br>{tr('mods.optimize_installed_tooltip')}"
+        )
         self.btn_optimize_installed.clicked.connect(self._optimize_installed_mods)
         actions.addWidget(self.btn_optimize_installed)
         
-        self.btn_select_all_inst = QPushButton(tr("common.select_all"))
+        self.btn_select_all_inst = IconButton("check", text="", size=18, icon_only=True)
+        self.btn_select_all_inst.setToolTip(
+            f"<b>{tr('common.select_all')}</b><br>{tr('common.select_all_tooltip')}"
+        )
         self.btn_select_all_inst.clicked.connect(self._select_all_installed)
         actions.addWidget(self.btn_select_all_inst)
         
-        self.btn_deselect_all_inst = QPushButton(tr("common.deselect_all"))
+        self.btn_deselect_all_inst = IconButton("close", text="", size=18, icon_only=True)
+        self.btn_deselect_all_inst.setToolTip(
+            f"<b>{tr('common.deselect_all')}</b><br>{tr('common.deselect_all_tooltip')}"
+        )
         self.btn_deselect_all_inst.clicked.connect(self._deselect_all_installed)
         actions.addWidget(self.btn_deselect_all_inst)
         
@@ -208,41 +256,20 @@ class ModsTab(BaseTab):
     
     def _create_workshop_table(self) -> ReusableTable:
         """Create and configure workshop table."""
-        columns = [
-            TableColumn("name", tr("mods.mod_name"), QHeaderView.Stretch),
-            TableColumn("version", tr("mods.mod_version"), QHeaderView.ResizeToContents),
-            TableColumn("size", tr("mods.mod_size"), QHeaderView.ResizeToContents),
-            TableColumn("date", tr("mods.mod_date"), QHeaderView.ResizeToContents),
-            TableColumn("status", tr("mods.mod_status"), QHeaderView.ResizeToContents),
-        ]
-        table = ReusableTable(columns, has_checkbox=True)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setAlternatingRowColors(True)
-        table.checkbox_toggled.connect(self._on_workshop_checkbox_toggled)
-        return table
+        return create_workshop_table(
+            tr=tr,
+            on_checkbox_toggled=self._on_workshop_checkbox_toggled,
+        )
     
     def _create_installed_table(self) -> ReusableTable:
         """Create and configure installed mods table."""
-        columns = [
-            TableColumn("name", tr("mods.mod_name"), QHeaderView.Stretch),
-            TableColumn("version", tr("mods.mod_version"), QHeaderView.ResizeToContents),
-            TableColumn("size", tr("mods.mod_size"), QHeaderView.ResizeToContents),
-            TableColumn("date", tr("mods.mod_date"), QHeaderView.ResizeToContents),
-            TableColumn("bikey", tr("mods.bikey_status"), QHeaderView.ResizeToContents),
-        ]
-        actions = [
-            TableAction("action", "", lambda row: self._on_installed_action(row)),
-        ]
-        table = ReusableTable(columns, actions, has_checkbox=True)
-        # Ensure rows are tall enough to accommodate action buttons
-        try:
-            table.verticalHeader().setDefaultSectionSize(36)
-        except Exception:
-            pass
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setAlternatingRowColors(True)
-        table.checkbox_toggled.connect(self._on_installed_checkbox_toggled)
-        return table
+        return create_installed_table(
+            tr=tr,
+            on_checkbox_toggled=self._on_installed_checkbox_toggled,
+            on_remove_clicked=lambda row_data: self._remove_single_mod(row_data.get("mod_folder"))
+            if row_data
+            else None,
+        )
     
     # ========== Profile & Refresh ==========
     
@@ -361,11 +388,19 @@ class ModsTab(BaseTab):
                     is_installed, version, installed_mods.get(mod_folder.lower())
                 )
                 date_format = self.settings.settings.datetime_format
+                workshop_tooltip = (
+                    f"{tr('mods.mod_version')}: {version or '-'}\n"
+                    f"{tr('mods.mod_size')}: {format_file_size(size)}\n"
+                    f"{tr('mods.workshop_date')}: {format_datetime(install_date, date_format)}\n"
+                    f"{tr('mods.mod_status')}: {status_text}"
+                )
                 row_data = {
                     "name": mod_folder,
                     "version": version or "-",
                     "size": format_file_size(size),
                     "date": format_datetime(install_date, date_format),
+                    "date_tooltip": workshop_tooltip,
+                    "name_tooltip": workshop_tooltip,
                     "status": status_text,
                     "checked": False,  # Default unchecked
                     "status_color": status_color,
@@ -476,8 +511,20 @@ class ModsTab(BaseTab):
                     if ws_date and install_date and ws_date > install_date:
                         has_update = True
                 
-                bikey_text = self._get_bikey_status_text(has_bikey, mod_bikeys)
+                bikey_text, bikey_icon, bikey_color = self._get_bikey_status(has_bikey, mod_bikeys)
                 date_format = self.settings.settings.datetime_format
+
+                # Tooltip should show both display name and folder name (if optimized).
+                base_tooltip = (
+                    f"{tr('mods.mod_version')}: {version or '-'}\n"
+                    f"{tr('mods.mod_size')}: {format_file_size(size)}\n"
+                    f"{tr('mods.install_date')}: {format_datetime(install_date, date_format)}\n"
+                    f"{tr('mods.bikey_status')}: {bikey_text}"
+                )
+                if original_folder != mod_folder:
+                    base_tooltip = f"{original_folder}\n({tr('mods.folder')}: {mod_folder})\n{base_tooltip}"
+                if has_update:
+                    base_tooltip = f"{base_tooltip}\n{tr('mods.update_available_tooltip')}"
                 
                 row_data = {
                     "name": original_folder,
@@ -485,6 +532,10 @@ class ModsTab(BaseTab):
                     "size": format_file_size(size),
                     "date": format_datetime(install_date, date_format),
                     "bikey": bikey_text,
+                    "bikey_icon": bikey_icon,
+                    "bikey_color": bikey_color,
+                    "name_tooltip": base_tooltip,
+                    "bikey_tooltip": "\n".join(mod_bikeys) if mod_bikeys else "No bikey files",
                     "checked": False,
                     "has_update": has_update,
                     "mod_folder": mod_folder,
@@ -520,16 +571,20 @@ class ModsTab(BaseTab):
         # Name
         name_item = QTableWidgetItem(original_folder)
         name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+        name_item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        base_tooltip = f"{tr('mods.mod_version')}: {version or '-'}"
         if original_folder != mod_folder:
-            name_item.setToolTip(f"{original_folder}\n({tr('mods.folder')}: {mod_folder})")
+            base_tooltip = f"{original_folder}\n({tr('mods.folder')}: {mod_folder})\n{base_tooltip}"
+        name_item.setToolTip(base_tooltip)
         if has_update:
             name_item.setForeground(QColor("#ff9800"))  # Orange for outdated
-            name_item.setToolTip(tr("mods.update_available_tooltip"))
+            name_item.setToolTip(f"{base_tooltip}\n{tr('mods.update_available_tooltip')}")
         self.installed_table.setItem(row, InstalledColumns.NAME, name_item)
         
         # Version
         version_item = QTableWidgetItem(version or "-")
         version_item.setFlags(version_item.flags() & ~Qt.ItemIsEditable)
+        version_item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         if has_update:
             version_item.setForeground(QColor("#ff9800"))
         self.installed_table.setItem(row, InstalledColumns.VERSION, version_item)
@@ -537,12 +592,14 @@ class ModsTab(BaseTab):
         # Size
         size_item = QTableWidgetItem(format_file_size(size))
         size_item.setFlags(size_item.flags() & ~Qt.ItemIsEditable)
+        size_item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.installed_table.setItem(row, InstalledColumns.SIZE, size_item)
         
         # Date
         date_format = self.settings.settings.datetime_format
         date_item = QTableWidgetItem(format_datetime(install_date, date_format))
         date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
+        date_item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         date_item.setData(Qt.UserRole, install_date)
         if has_update:
             date_item.setForeground(QColor("#ff9800"))
@@ -552,6 +609,7 @@ class ModsTab(BaseTab):
         bikey_text, bikey_icon, bikey_color = self._get_bikey_status(has_bikey, mod_bikeys)
         bikey_item = QTableWidgetItem(bikey_text)
         bikey_item.setFlags(bikey_item.flags() & ~Qt.ItemIsEditable)
+        bikey_item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         bikey_item.setForeground(QColor(bikey_color))
         bikey_item.setToolTip("\n".join(mod_bikeys) if mod_bikeys else "No bikey files")
         try:
@@ -563,36 +621,50 @@ class ModsTab(BaseTab):
         # Action buttons container: single widget that expands vertically
         actions_widget = QWidget()
         actions_widget.setObjectName("installed_actions_widget")
-        actions_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        actions_widget.setFocusPolicy(Qt.NoFocus)
+        # Make the actions container transparent and tight so only icons are visible
+        actions_widget.setStyleSheet("background: transparent; border: none;")
+        actions_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         actions_layout = QHBoxLayout(actions_widget)
-        actions_layout.setContentsMargins(4, 0, 4, 0)
-        actions_layout.setSpacing(6)
-        actions_layout.setAlignment(Qt.AlignVCenter | Qt.AlignHCenter)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(4)
+        actions_layout.setAlignment(Qt.AlignCenter)
 
         # Add bikeys button (only if mod has bikeys but not installed in keys folder)
         if mod_bikeys and not has_bikey:
-            btn_add_bikey = IconButton("key", icon_only=True, size=14)
+            btn_add_bikey = IconButton("key", color=ThemeManager.get_text_color(), icon_only=True, size=18)
             btn_add_bikey.setToolTip(tr("mods.add_bikeys"))
-            btn_add_bikey.setMinimumSize(20, 20)
+            btn_add_bikey.setFixedSize(26, 26)
+            btn_add_bikey.setIcon(Icons.get_icon("key", ThemeManager.get_text_color(), 16))
+            btn_add_bikey.setIconSize(QSize(16, 16))
+            btn_add_bikey.setStyleSheet("QPushButton{background:transparent;border:none;padding:0px;}")
+            btn_add_bikey.setFlat(True)
+            btn_add_bikey.setAutoFillBackground(False)
             btn_add_bikey.clicked.connect(lambda checked=False, mf=mod_folder: self._add_single_mod_bikeys(mf))
             actions_layout.addWidget(btn_add_bikey)
 
         # Remove button with theme-aware icon
-        btn_remove = IconButton("trash", icon_only=True, size=14)
+        btn_remove = IconButton("trash", color=ThemeManager.get_text_color(), icon_only=True, size=18)
         btn_remove.setToolTip(tr("common.remove"))
-        btn_remove.setMinimumSize(20, 20)
+        btn_remove.setFixedSize(26, 26)
+        btn_remove.setIcon(Icons.get_icon("trash", ThemeManager.get_text_color(), 16))
+        btn_remove.setIconSize(QSize(16, 16))
+        btn_remove.setStyleSheet("QPushButton{background:transparent;border:none;padding:0px;}")
+        btn_remove.setFlat(True)
+        btn_remove.setAutoFillBackground(False)
         btn_remove.clicked.connect(lambda checked=False, mf=mod_folder: self._remove_single_mod(mf))
         actions_layout.addWidget(btn_remove)
 
         # Let layouts compute sizes, then ensure actions_widget/min row height follow
         try:
             actions_widget.adjustSize()
-            aw_h = actions_widget.sizeHint().height()
-            if aw_h and aw_h > 0:
-                actions_widget.setMinimumHeight(aw_h)
-                # set row height slightly larger than widget to allow for focus borders
-                self.installed_table.setRowHeight(row, max(self.installed_table.rowHeight(row), aw_h + 6))
+            # Set a fixed width to keep the action cell compact
+            aw_w = actions_widget.sizeHint().width() or 40
+            aw_h = actions_widget.sizeHint().height() or 28
+            actions_widget.setFixedSize(max(aw_w, 40), max(aw_h, 28))
+            # set row height slightly larger than widget
+            self.installed_table.setRowHeight(row, max(self.installed_table.rowHeight(row), actions_widget.height() + 6))
         except Exception:
             pass
 
@@ -654,6 +726,9 @@ class ModsTab(BaseTab):
                 if visible_only and table.isRowHidden(row):
                     continue
                 table.set_row_checked(row, checked)
+            # Clear table selection to match checkbox state
+            if not checked:
+                table.clearSelection()
         finally:
             self._populating = False
     
@@ -852,8 +927,13 @@ class ModsTab(BaseTab):
         
         # Check if name optimization is enabled
         optimize_names = False
-        if operation in ("add", "update") and hasattr(self, 'chk_optimize_names'):
-            optimize_names = self.chk_optimize_names.isChecked()
+        if operation in ("add", "update"):
+            optimize_toggle = getattr(self, "btn_optimize_names", None)
+            if optimize_toggle is not None:
+                try:
+                    optimize_names = bool(optimize_toggle.isChecked())
+                except Exception:
+                    optimize_names = False
         if operation == "optimize_installed":
             optimize_names = True
         
@@ -1086,11 +1166,5 @@ class ModsTab(BaseTab):
         self.search_workshop.setPlaceholderText(f"{tr('common.search')}...")
         self.search_installed.setPlaceholderText(f"{tr('common.search')}...")
         
-        self.workshop_table.setHorizontalHeaderLabels([
-            "", tr("mods.mod_name"), tr("mods.mod_version"),
-            tr("mods.mod_size"), tr("mods.mod_date"), tr("mods.mod_status")
-        ])
-        self.installed_table.setHorizontalHeaderLabels([
-            "", tr("mods.mod_name"), tr("mods.mod_version"),
-            tr("mods.mod_size"), tr("mods.mod_date"), tr("mods.bikey_status"), tr("common.actions")
-        ])
+        update_workshop_table_headers(self.workshop_table, tr=tr)
+        update_installed_table_headers(self.installed_table, tr=tr)

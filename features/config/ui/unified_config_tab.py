@@ -47,6 +47,7 @@ class UnifiedConfigTab(QWidget):
         self.change_manager = ConfigChangeManager()
         self._loading = False  # Flag to prevent change detection during load
         self.config_widgets = {}  # Will store server config widgets
+        self._last_subtab_index = 0
         
         self._setup_ui()
         self._connect_change_signals()
@@ -78,31 +79,6 @@ class UnifiedConfigTab(QWidget):
         self.lbl_title = QLabel(f"<h2>{tr('config.unified_title')}</h2>")
         header.addWidget(self.lbl_title)
         header.addStretch()
-
-        # Mission config merger
-        self.btn_mission_merger_header = IconButton("cog", tr("mission_merge.open_mission_merger"), size=16)
-        self.btn_mission_merger_header.setEnabled(False)
-        self.btn_mission_merger_header.clicked.connect(self._open_mission_merger)
-        header.addWidget(self.btn_mission_merger_header)
-        
-        # Fix duplicates button
-        self.btn_fix_duplicates = IconButton("refresh", tr("mission_merge.fix_duplicates"), size=16)
-        self.btn_fix_duplicates.setEnabled(False)
-        self.btn_fix_duplicates.clicked.connect(self._open_duplicate_fixer)
-        header.addWidget(self.btn_fix_duplicates)
-        
-        # Restore button
-        self.btn_restore = IconButton("undo", tr("config.restore_changes"), size=16)
-        self.btn_restore.setEnabled(False)
-        self.btn_restore.clicked.connect(self._restore_changes)
-        header.addWidget(self.btn_restore)
-        
-        # Preview & Save button
-        self.btn_save = IconButton("save", tr("common.save"), size=16)
-        self.btn_save.setObjectName("primary")
-        self.btn_save.setEnabled(False)
-        self.btn_save.clicked.connect(self._preview_and_save)
-        header.addWidget(self.btn_save)
         
         layout.addLayout(header)
     
@@ -120,6 +96,7 @@ class UnifiedConfigTab(QWidget):
         
         # Tab widget for sub-sections
         self.tabs = QTabWidget()
+        self.tabs.currentChanged.connect(self._on_subtab_changed)
         
         # Create sub-tabs
         self.tab_launcher = self._create_launcher_tab()
@@ -127,8 +104,11 @@ class UnifiedConfigTab(QWidget):
 
         # Embedded resource browsers
         # NOTE: presets are stored separately per-scope to avoid overwriting between tabs.
-        self.tab_map_resources = ResourcesBrowserWidget(preset_scope="map")
-        self.tab_mods_resources = ResourcesBrowserWidget(preset_scope="mods")
+        self._map_resources_browser = ResourcesBrowserWidget(preset_scope="map")
+        self._mods_resources_browser = ResourcesBrowserWidget(preset_scope="mods")
+
+        self.tab_map_resources = self._create_map_resources_tab()
+        self.tab_mods_resources = self._mods_resources_browser
         
         self.tabs.addTab(self.tab_launcher, tr("config.tab_launcher"))
         self.tabs.addTab(self.tab_server_config, tr("config.tab_server"))
@@ -140,6 +120,36 @@ class UnifiedConfigTab(QWidget):
         layout.addWidget(self.content_widget)
         self.content_widget.setVisible(False)
 
+    def _create_map_resources_tab(self) -> QWidget:
+        """Create Map Resources tab with map-related action buttons."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+
+        self.btn_mission_merger_map = IconButton("cog", "", size=16, icon_only=True)
+        self.btn_mission_merger_map.setToolTip(
+            f"<b>{tr('mission_merge.open_mission_merger_tooltip')}</b><br>{tr('mission_merge.open_mission_merger_description')}"
+        )
+        self.btn_mission_merger_map.setEnabled(False)
+        self.btn_mission_merger_map.clicked.connect(self._open_mission_merger)
+        actions.addWidget(self.btn_mission_merger_map)
+
+        self.btn_fix_duplicates_map = IconButton("refresh", "", size=16, icon_only=True)
+        self.btn_fix_duplicates_map.setToolTip(
+            f"<b>{tr('mission_merge.duplicate_fixer_title')}</b><br>{tr('mission_merge.duplicate_fixer_info')}"
+        )
+        self.btn_fix_duplicates_map.setEnabled(False)
+        self.btn_fix_duplicates_map.clicked.connect(self._open_duplicate_fixer)
+        actions.addWidget(self.btn_fix_duplicates_map)
+
+        layout.addLayout(actions)
+        layout.addWidget(self._map_resources_browser)
+        return widget
+
     # ==================== Launcher Tab ====================
     
     def _create_launcher_tab(self) -> QWidget:
@@ -147,6 +157,27 @@ class UnifiedConfigTab(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
+
+        # Per-tab actions
+        actions = QHBoxLayout()
+        actions.addStretch()
+        self.btn_launcher_reset = IconButton("refresh", "", size=16, icon_only=True)
+        self.btn_launcher_reset.setToolTip(f"{tr('config.reset_to_defaults')}\n{tr('tabs.launcher')}")
+        self.btn_launcher_reset.clicked.connect(lambda: self._reset_to_defaults_for("launcher"))
+        actions.addWidget(self.btn_launcher_reset)
+        
+        self.btn_launcher_restore = IconButton("undo", "", size=16, icon_only=True)
+        self.btn_launcher_restore.setToolTip(f"{tr('config.restore_changes')}\n{tr('tabs.launcher')}")
+        self.btn_launcher_restore.setEnabled(False)
+        self.btn_launcher_restore.clicked.connect(lambda: self._restore_changes_for("launcher"))
+        actions.addWidget(self.btn_launcher_restore)
+
+        self.btn_launcher_save = IconButton("save", "", size=16, icon_only=True, object_name="primary")
+        self.btn_launcher_save.setToolTip(f"{tr('common.save')}\n{tr('tabs.launcher')}")
+        self.btn_launcher_save.setEnabled(False)
+        self.btn_launcher_save.clicked.connect(lambda: self._preview_and_save(scope="launcher"))
+        actions.addWidget(self.btn_launcher_save)
+        layout.addLayout(actions)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -313,6 +344,27 @@ class UnifiedConfigTab(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
+
+        # Per-tab actions
+        actions = QHBoxLayout()
+        actions.addStretch()
+        self.btn_server_reset = IconButton("refresh", "", size=16, icon_only=True)
+        self.btn_server_reset.setToolTip(f"{tr('config.reset_to_defaults')}\n{tr('tabs.config')}")
+        self.btn_server_reset.clicked.connect(lambda: self._reset_to_defaults_for("server_config"))
+        actions.addWidget(self.btn_server_reset)
+        
+        self.btn_server_restore = IconButton("undo", "", size=16, icon_only=True)
+        self.btn_server_restore.setToolTip(f"{tr('config.restore_changes')}\n{tr('tabs.config')}")
+        self.btn_server_restore.setEnabled(False)
+        self.btn_server_restore.clicked.connect(lambda: self._restore_changes_for("server_config"))
+        actions.addWidget(self.btn_server_restore)
+
+        self.btn_server_save = IconButton("save", "", size=16, icon_only=True, object_name="primary")
+        self.btn_server_save.setToolTip(f"{tr('common.save')}\n{tr('tabs.config')}")
+        self.btn_server_save.setEnabled(False)
+        self.btn_server_save.clicked.connect(lambda: self._preview_and_save(scope="server_config"))
+        actions.addWidget(self.btn_server_save)
+        layout.addLayout(actions)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -444,6 +496,7 @@ class UnifiedConfigTab(QWidget):
         if not self._loading:
             self.change_manager.update_launcher_config(key, value)
             self._update_preview()
+            self._refresh_action_states()
     
     def _on_mods_changed(self):
         """Handle mods text change."""
@@ -456,19 +509,41 @@ class UnifiedConfigTab(QWidget):
             self.lbl_mods_info.setText(f"{tr('mods.selected')}: {len(mods_list)} mods")
             self._update_mods_warnings()
             self._update_preview()
+            self._refresh_action_states()
     
     def _on_config_changed(self, key: str, value):
         """Handle server config change."""
         if not self._loading:
             self.change_manager.update_server_config(key, value)
+            self._refresh_action_states()
     
     def _on_changes_detected(self, has_changes: bool):
         """Handle change detection signal."""
-        self.btn_save.setEnabled(has_changes)
-        self.btn_restore.setEnabled(has_changes)
-        
-        # Update change indicator
+        # Overall indicator only. Per-tab action enablement is refreshed as fields change.
         color = "#f0ad4e" if has_changes else "transparent"
+        self.change_indicator.setStyleSheet(f"background-color: {color};")
+        self._refresh_action_states()
+
+    def _refresh_action_states(self) -> None:
+        """Refresh per-tab action enablement based on current change state."""
+        try:
+            launcher_dirty = self.change_manager.has_unsaved_changes_for("launcher")
+            server_dirty = self.change_manager.has_unsaved_changes_for("server_config")
+        except Exception:
+            launcher_dirty = False
+            server_dirty = False
+
+        if hasattr(self, "btn_launcher_save"):
+            self.btn_launcher_save.setEnabled(launcher_dirty)
+        if hasattr(self, "btn_launcher_restore"):
+            self.btn_launcher_restore.setEnabled(launcher_dirty)
+        if hasattr(self, "btn_server_save"):
+            self.btn_server_save.setEnabled(server_dirty)
+        if hasattr(self, "btn_server_restore"):
+            self.btn_server_restore.setEnabled(server_dirty)
+
+        any_dirty = launcher_dirty or server_dirty
+        color = "#f0ad4e" if any_dirty else "transparent"
         self.change_indicator.setStyleSheet(f"background-color: {color};")
 
     # ==================== Profile Loading ====================
@@ -480,18 +555,17 @@ class UnifiedConfigTab(QWidget):
         self.lbl_no_profile.setVisible(False)
         self.content_widget.setVisible(True)
 
-        if hasattr(self, "btn_mission_merger_header"):
-            self.btn_mission_merger_header.setEnabled(True)
-        
-        if hasattr(self, "btn_fix_duplicates"):
-            self.btn_fix_duplicates.setEnabled(True)
+        if hasattr(self, "btn_mission_merger_map"):
+            self.btn_mission_merger_map.setEnabled(True)
+        if hasattr(self, "btn_fix_duplicates_map"):
+            self.btn_fix_duplicates_map.setEnabled(True)
         
         server_path = profile_data.get("server_path", "")
         self.txt_server_location.setText(server_path)
         
         # Set profile for resource browsers (for preset management)
-        self.tab_map_resources.set_profile(profile_data)
-        self.tab_mods_resources.set_profile(profile_data)
+        self._map_resources_browser.set_profile(profile_data)
+        self._mods_resources_browser.set_profile(profile_data)
         
         # Load configurations
         self._load_launcher_config(server_path)
@@ -509,12 +583,13 @@ class UnifiedConfigTab(QWidget):
         self._loading = False
         self._update_preview()
         self._update_resource_roots()
+        self._refresh_action_states()
 
     def _update_resource_roots(self):
         """Update embedded resource browsers for config/ and mpmissions/<map>."""
         if not self.current_profile:
-            self.tab_map_resources.set_root_path(None)
-            self.tab_mods_resources.set_root_path(None)
+            self._map_resources_browser.set_root_path(None)
+            self._mods_resources_browser.set_root_path(None)
             return
 
         server_path = Path(self.current_profile.get("server_path", ""))
@@ -522,13 +597,13 @@ class UnifiedConfigTab(QWidget):
             server_path = server_path.parent
 
         if not server_path.exists():
-            self.tab_map_resources.set_root_path(None)
-            self.tab_mods_resources.set_root_path(None)
+            self._map_resources_browser.set_root_path(None)
+            self._mods_resources_browser.set_root_path(None)
             return
 
         # Mods resources (server/config)
         config_root = server_path / "config"
-        self.tab_mods_resources.set_root_path(config_root if config_root.exists() else None)
+        self._mods_resources_browser.set_root_path(config_root if config_root.exists() else None)
 
         # Map resources (server/mpmissions/<template>)
         template = self.cmb_map.currentData() or "dayzOffline.chernarusplus"
@@ -543,7 +618,7 @@ class UnifiedConfigTab(QWidget):
                         mission_root = folder
                         break
 
-        self.tab_map_resources.set_root_path(mission_root if mission_root.exists() else None)
+        self._map_resources_browser.set_root_path(mission_root if mission_root.exists() else None)
     
     def _load_launcher_config(self, server_path: str):
         """Load launcher configuration from files."""
@@ -759,13 +834,83 @@ class UnifiedConfigTab(QWidget):
         
         self._loading = False
         self._update_preview()
+
+    def _restore_launcher_from_snapshot(self, snapshot: ConfigSnapshot) -> None:
+        self._loading = True
+        lc = snapshot.launcher
+        self.txt_server_name.setText(lc.get("server_name", ""))
+        self.txt_server_location.setText(lc.get("server_location", ""))
+        self.spin_port.setValue(lc.get("port", LAUNCHER_DEFAULTS.port))
+        self.txt_config.setText(lc.get("config_file", LAUNCHER_DEFAULTS.config_file))
+        self.spin_cpu.setValue(lc.get("cpu_count", LAUNCHER_DEFAULTS.cpu_count))
+        self.spin_timeout.setValue(lc.get("timeout", LAUNCHER_DEFAULTS.timeout))
+        self.chk_dologs.setChecked(lc.get("do_logs", LAUNCHER_DEFAULTS.do_logs))
+        self.chk_adminlog.setChecked(lc.get("admin_log", LAUNCHER_DEFAULTS.admin_log))
+        self.chk_netlog.setChecked(lc.get("net_log", LAUNCHER_DEFAULTS.net_log))
+        self.chk_freezecheck.setChecked(lc.get("freeze_check", LAUNCHER_DEFAULTS.freeze_check))
+        self.chk_use_mods_file.setChecked(lc.get("use_mods_file", LAUNCHER_DEFAULTS.use_mods_file))
+        self.txt_mods.setText(lc.get("mods", ""))
+        self._loading = False
+        self._update_preview()
+
+    def _restore_server_config_from_snapshot(self, snapshot: ConfigSnapshot) -> None:
+        self._loading = True
+        for field_name, widget in self.config_widgets.items():
+            value = snapshot.server_config.get(field_name)
+            if value is None:
+                continue
+            if isinstance(widget, QLineEdit):
+                widget.setText(str(value))
+            elif isinstance(widget, QSpinBox):
+                widget.setValue(value)
+            elif isinstance(widget, QCheckBox):
+                widget.setChecked(value)
+
+        template = snapshot.server_config.get("mission_template")
+        if template:
+            for i in range(self.cmb_map.count()):
+                if self.cmb_map.itemData(i) == template:
+                    self.cmb_map.setCurrentIndex(i)
+                    break
+        self._loading = False
     
-    def _restore_changes(self):
-        """Restore configuration to original state."""
-        original = self.change_manager.restore_original()
-        if original:
-            self._restore_from_snapshot(original)
-            QMessageBox.information(self, tr("common.success"), tr("config.changes_restored"))
+    def _restore_changes_for(self, scope: str):
+        """Restore a single scope to its original state."""
+        original = self.change_manager.restore_original_for(scope)
+        if not original:
+            return
+
+        if scope == "launcher":
+            self._restore_launcher_from_snapshot(original)
+        elif scope == "server_config":
+            self._restore_server_config_from_snapshot(original)
+        else:
+            return
+
+        self._refresh_action_states()
+        QMessageBox.information(self, tr("common.success"), tr("config.changes_restored"))
+
+    def _reset_to_defaults_for(self, scope: str):
+        """Reset a single scope to default values."""
+        if QMessageBox.question(
+            self, tr("common.confirm"), 
+            tr("config.confirm_reset_to_defaults").format(scope=tr(f"tabs.{scope}"))
+        ) != QMessageBox.Yes:
+            return
+
+        defaults = self.change_manager.reset_to_defaults_for(scope)
+        if not defaults:
+            return
+
+        if scope == "launcher":
+            self._restore_launcher_from_snapshot(defaults)
+        elif scope == "server_config":
+            self._restore_server_config_from_snapshot(defaults)
+        else:
+            return
+
+        self._refresh_action_states()
+        QMessageBox.information(self, tr("common.success"), tr("config.reset_to_defaults_success"))
 
     def discard_changes(self):
         """Discard unsaved changes without showing dialogs."""
@@ -775,13 +920,77 @@ class UnifiedConfigTab(QWidget):
 
     # ==================== Save ====================
     
-    def _preview_and_save(self):
+    def _preview_and_save(self, scope: str = "all"):
         """Show preview dialog and save if confirmed."""
         changes = self.change_manager.get_changes_summary()
-        
+
+        if scope == "launcher":
+            changes = {"launcher": changes.get("launcher", []), "server_config": []}
+        elif scope == "server_config":
+            changes = {"launcher": [], "server_config": changes.get("server_config", [])}
+
         dialog = ChangePreviewDialog(changes, self)
         if dialog.exec() == QDialog.Accepted:
-            self._save_all()
+            if scope == "launcher":
+                self._save_launcher_only()
+            elif scope == "server_config":
+                self._save_server_config_only()
+            else:
+                self._save_all()
+
+    def _save_launcher_only(self) -> None:
+        """Save start.bat + mods.txt only."""
+        if not self.current_profile:
+            return
+
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+
+        if is_dayz_server_running():
+            QMessageBox.warning(self, tr("common.warning"), tr("dialogs.server_running_save_blocked"))
+            return
+
+        try:
+            bat_content = self._generate_bat_content()
+            (server_path / "start.bat").write_text(bat_content, encoding="utf-8")
+
+            mods_text = self._format_mods_list(self._parse_mods_list(self.txt_mods.toPlainText()))
+            (server_path / "mods.txt").write_text(mods_text, encoding="utf-8")
+
+            self.change_manager.mark_saved_for("launcher")
+            QMessageBox.information(self, tr("common.success"), tr("config.all_saved"))
+            self.config_saved.emit()
+            self._refresh_action_states()
+        except Exception as e:
+            QMessageBox.critical(self, tr("common.error"), str(e))
+
+    def _save_server_config_only(self) -> None:
+        """Save serverDZ.cfg only."""
+        if not self.current_profile:
+            return
+
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+
+        if is_dayz_server_running():
+            QMessageBox.warning(self, tr("common.warning"), tr("dialogs.server_running_save_blocked"))
+            return
+
+        try:
+            cfg_content = self._generate_cfg_content()
+            (server_path / "serverDZ.cfg").write_text(cfg_content, encoding="utf-8")
+
+            self.change_manager.mark_saved_for("server_config")
+            self._load_server_config(str(server_path))
+            QMessageBox.information(self, tr("common.success"), tr("config.all_saved"))
+            self.config_saved.emit()
+            self._refresh_action_states()
+        except Exception as e:
+            QMessageBox.critical(self, tr("common.error"), str(e))
     
     def _save_all(self):
         """Save all configuration to files."""
@@ -1129,12 +1338,53 @@ goto start
         from shared.ui.dialogs.mission_merge_dialog import DuplicateFixerDialog
         dialog = DuplicateFixerDialog(server_path, mission_template, self)
         dialog.exec()
+
+    def _confirm_unsaved_for_scope(self, scope: str) -> bool:
+        """Return True if it is OK to leave the current scope."""
+        try:
+            if not self.change_manager.has_unsaved_changes_for(scope):
+                return True
+        except Exception:
+            return True
+
+        from features.config.ui.config_manager import UnsavedChangesDialog
+        dialog = UnsavedChangesDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return False
+
+        action = dialog.get_result()
+        if action == UnsavedChangesDialog.SAVE:
+            self._preview_and_save(scope=scope)
+            return True
+        if action == UnsavedChangesDialog.DISCARD:
+            self._restore_changes_for(scope)
+            return True
+        # CANCEL
+        return False
+
+    def _on_subtab_changed(self, new_index: int) -> None:
+        prev_index = getattr(self, "_last_subtab_index", 0)
+        if new_index == prev_index:
+            return
+
+        scope_by_index = {0: "launcher", 1: "server_config"}
+        prev_scope = scope_by_index.get(prev_index)
+        if prev_scope and not self._loading:
+            if not self._confirm_unsaved_for_scope(prev_scope):
+                try:
+                    self.tabs.blockSignals(True)
+                    self.tabs.setCurrentIndex(prev_index)
+                finally:
+                    self.tabs.blockSignals(False)
+                return
+
+        self._last_subtab_index = new_index
     
     def _on_mission_merge_completed(self, result: dict):
         """Handle mission merge completion."""
         # Refresh resources browser if visible
-        if hasattr(self, 'tab_map_resources'):
-            self.tab_map_resources.refresh()
+        if hasattr(self, '_map_resources_browser'):
+            self._map_resources_browser.refresh()
     
     def has_unsaved_changes(self) -> bool:
         """Check if there are unsaved changes."""
@@ -1143,12 +1393,6 @@ goto start
     def update_texts(self):
         """Update UI texts for language change."""
         self.lbl_title.setText(f"<h2>{tr('config.unified_title')}</h2>")
-        if hasattr(self, "btn_mission_merger_header"):
-            self.btn_mission_merger_header.setText(tr("mission_merge.open_mission_merger"))
-        if hasattr(self, "btn_fix_duplicates"):
-            self.btn_fix_duplicates.setText(tr("mission_merge.fix_duplicates"))
-        self.btn_restore.setText(tr("config.restore_changes"))
-        self.btn_save.setText(tr("common.save"))
         self.lbl_no_profile.setText(tr("config.select_profile_first"))
         
         self.tabs.setTabText(0, tr("config.tab_launcher"))
@@ -1156,7 +1400,16 @@ goto start
         self.tabs.setTabText(2, tr("config.tab_map_resources"))
         self.tabs.setTabText(3, tr("config.tab_mods_resources"))
 
-        if hasattr(self, "tab_map_resources"):
-            self.tab_map_resources.update_texts()
-        if hasattr(self, "tab_mods_resources"):
-            self.tab_mods_resources.update_texts()
+        if hasattr(self, '_map_resources_browser'):
+            self._map_resources_browser.update_texts()
+        if hasattr(self, '_mods_resources_browser'):
+            self._mods_resources_browser.update_texts()
+
+        if hasattr(self, "btn_mission_merger_map"):
+            self.btn_mission_merger_map.setToolTip(
+                f"<b>{tr('mission_merge.open_mission_merger_tooltip')}</b><br>{tr('mission_merge.open_mission_merger_description')}"
+            )
+        if hasattr(self, "btn_fix_duplicates_map"):
+            self.btn_fix_duplicates_map.setToolTip(
+                f"<b>{tr('mission_merge.duplicate_fixer_title')}</b><br>{tr('mission_merge.duplicate_fixer_info')}"
+            )
