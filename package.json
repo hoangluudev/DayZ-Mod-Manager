@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "description": "DayZ Mod Manager & Server Controller - Desktop Application",
   "scripts": {
-    "start": "cmd /c python main.py",
-    "dev": "cmd /c set DAYZMM_ENV=dev && python main.py",
+    "start": "cmd /c taskkill /f /im python.exe /t >nul 2>&1 && python main.py",
+    "dev": "cmd /c set DAYZMM_ENV=dev && taskkill /f /im python.exe /t >nul 2>&1 && python main.py",
     "build:prod": "cmd /c build.bat prod nopause",
     "build:dev": "cmd /c build.bat dev nopause",
     "build:installer": "cmd /c build.bat prod installer nopause",
