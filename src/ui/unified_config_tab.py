@@ -26,6 +26,7 @@ from src.ui.server_resources_tab import ResourcesBrowserWidget
 from src.ui.highlighters import ModsListHighlighter
 from src.ui.dialogs.mod_sort_dialog import ModSortDialog
 from src.ui.dialogs.mission_merge_dialog import MissionConfigMergeDialog
+from src.ui.dialogs.vehicle_manager_dialog import VehicleManagerDialog
 from src.constants.config import (
     CONFIG_FIELDS, ConfigFieldDef, AVAILABLE_MAPS, 
     LAUNCHER_DEFAULTS, get_mod_priority
@@ -84,6 +85,12 @@ class UnifiedConfigTab(QWidget):
         self.btn_mission_merger_header.setEnabled(False)
         self.btn_mission_merger_header.clicked.connect(self._open_mission_merger)
         header.addWidget(self.btn_mission_merger_header)
+        
+        # Vehicle manager button
+        self.btn_vehicle_manager = IconButton("browse", tr("vehicle_manager.title"), size=16)
+        self.btn_vehicle_manager.setEnabled(False)
+        self.btn_vehicle_manager.clicked.connect(self._open_vehicle_manager)
+        header.addWidget(self.btn_vehicle_manager)
         
         # Fix duplicates button
         self.btn_fix_duplicates = IconButton("refresh", tr("mission_merge.fix_duplicates"), size=16)
@@ -482,6 +489,9 @@ class UnifiedConfigTab(QWidget):
 
         if hasattr(self, "btn_mission_merger_header"):
             self.btn_mission_merger_header.setEnabled(True)
+        
+        if hasattr(self, "btn_vehicle_manager"):
+            self.btn_vehicle_manager.setEnabled(True)
         
         if hasattr(self, "btn_fix_duplicates"):
             self.btn_fix_duplicates.setEnabled(True)
@@ -1113,6 +1123,22 @@ goto start
         dialog.merge_completed.connect(self._on_mission_merge_completed)
         dialog.exec()
     
+    def _open_vehicle_manager(self):
+        """Open the Vehicle Manager dialog."""
+        if not self.current_profile:
+            QMessageBox.warning(self, tr("common.warning"), tr("config.select_profile_first"))
+            return
+        
+        server_path = Path(self.current_profile.get("server_path", ""))
+        if not server_path.exists():
+            QMessageBox.warning(self, tr("common.warning"), tr("validation.invalid_path"))
+            return
+        
+        mission_template = self.cmb_map.currentData() or "dayzOffline.chernarusplus"
+        
+        dialog = VehicleManagerDialog(server_path, mission_template, self)
+        dialog.exec()
+    
     def _open_duplicate_fixer(self):
         """Open the Duplicate Fixer dialog."""
         if not self.current_profile:
@@ -1145,6 +1171,8 @@ goto start
         self.lbl_title.setText(f"<h2>{tr('config.unified_title')}</h2>")
         if hasattr(self, "btn_mission_merger_header"):
             self.btn_mission_merger_header.setText(tr("mission_merge.open_mission_merger"))
+        if hasattr(self, "btn_vehicle_manager"):
+            self.btn_vehicle_manager.setText(tr("vehicle_manager.title"))
         if hasattr(self, "btn_fix_duplicates"):
             self.btn_fix_duplicates.setText(tr("mission_merge.fix_duplicates"))
         self.btn_restore.setText(tr("config.restore_changes"))
